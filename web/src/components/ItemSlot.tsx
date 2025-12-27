@@ -13,37 +13,41 @@ export function ItemSlot({
   item_id,
   quantity,
   showQuantity = true,
-  size = 'md',
   onClick,
   selected,
 }: ItemSlotProps) {
-  const sizeClasses = {
-    sm: 'w-12 h-12 text-xs',
-    md: 'w-16 h-16 text-sm',
-    lg: 'w-20 h-20 text-base',
-  };
-
   const colorClass = ITEM_COLORS[item_id] || 'bg-gray-300';
   const name = ITEM_NAMES[item_id] || `Item #${item_id}`;
+
+  // Extract base color for terminal style
+  const colorMap: Record<string, string> = {
+    'bg-red-500': 'var(--color-red-60)',
+    'bg-blue-500': 'var(--color-teal-60)',
+    'bg-green-500': 'var(--color-neon-green-70)',
+    'bg-yellow-500': 'var(--color-gold-30)',
+    'bg-purple-500': '#9333ea',
+  };
+  const bgColor = colorMap[colorClass] || 'var(--fg-muted)';
 
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      className={`
-        ${sizeClasses[size]}
-        relative rounded-lg border-2 transition-all
-        ${selected ? 'border-primary-500 ring-2 ring-primary-200' : 'border-gray-200'}
-        ${onClick ? 'cursor-pointer hover:border-primary-300' : 'cursor-default'}
-        flex flex-col items-center justify-center gap-1
-        bg-white
-      `}
+      className={`item-slot ${selected ? 'selected' : ''}`}
       title={`${name}: ${quantity}`}
     >
-      <div className={`w-6 h-6 rounded ${colorClass}`} />
+      <div
+        className="item-slot-icon"
+        style={{
+          width: '1.5em',
+          height: '1.5em',
+          background: bgColor,
+        }}
+      />
+      <span className="item-slot-name">{name.slice(0, 6)}</span>
       {showQuantity && (
-        <span className="font-medium text-gray-700">{quantity}</span>
+        <span className="item-slot-qty">{quantity}</span>
       )}
     </button>
   );
@@ -54,40 +58,18 @@ interface EmptySlotProps {
   onClick?: () => void;
 }
 
-export function EmptySlot({ size = 'md', onClick }: EmptySlotProps) {
-  const sizeClasses = {
-    sm: 'w-12 h-12',
-    md: 'w-16 h-16',
-    lg: 'w-20 h-20',
-  };
-
+export function EmptySlot({ onClick }: EmptySlotProps) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={!onClick}
-      className={`
-        ${sizeClasses[size]}
-        rounded-lg border-2 border-dashed border-gray-200
-        ${onClick ? 'cursor-pointer hover:border-gray-300 hover:bg-gray-50' : 'cursor-default'}
-        flex items-center justify-center
-        transition-all
-      `}
+      className={`item-slot empty ${onClick ? '' : ''}`}
     >
-      {onClick && (
-        <svg
-          className="w-5 h-5 text-gray-400"
-          fill="none"
-          viewBox="0 0 24 24"
-          stroke="currentColor"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M12 4v16m8-8H4"
-          />
-        </svg>
+      {onClick ? (
+        <span className="text-muted">[+]</span>
+      ) : (
+        <span className="text-muted">-</span>
       )}
     </button>
   );

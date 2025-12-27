@@ -32,15 +32,12 @@ export function Transfer() {
   const { packageId, verifyingKeysId, volumeRegistryId } = useContractAddresses();
   const { mutateAsync: signTransaction } = useSignTransaction();
 
-  // Check if local signer is available
   const useLocalSigner = hasLocalSigner();
   const localAddress = useLocalSigner ? getLocalAddress() : null;
   const effectiveAddress = localAddress || account?.address;
 
-  // Mode
   const [mode, setMode] = useState<Mode>('demo');
 
-  // Demo mode state
   const [source, setSource] = useState<InventoryState>({
     slots: [
       { item_id: 1, quantity: 100 },
@@ -56,13 +53,11 @@ export function Transfer() {
     commitment: null,
   });
 
-  // On-chain mode state
   const [srcOnChain, setSrcOnChain] = useState<OnChainInventory | null>(null);
   const [srcLocalData, setSrcLocalData] = useState<LocalInventoryData | null>(null);
   const [dstOnChain, setDstOnChain] = useState<OnChainInventory | null>(null);
   const [dstLocalData, setDstLocalData] = useState<LocalInventoryData | null>(null);
 
-  // Shared state
   const [itemId, setItemId] = useState(1);
   const [amount, setAmount] = useState(30);
   const [proofResult, setProofResult] = useState<TransferResult | null>(null);
@@ -71,7 +66,6 @@ export function Transfer() {
   const [transferComplete, setTransferComplete] = useState(false);
   const [txDigest, setTxDigest] = useState<string | null>(null);
 
-  // Get current slots based on mode
   const currentSrcSlots = mode === 'demo' ? source.slots : srcLocalData?.slots || [];
   const currentDstSlots = mode === 'demo' ? destination.slots : dstLocalData?.slots || [];
   const currentSrcBlinding = mode === 'demo' ? source.blinding : srcLocalData?.blinding;
@@ -80,7 +74,6 @@ export function Transfer() {
   const sourceItem = currentSrcSlots.find((s) => s.item_id === itemId);
   const canTransfer = sourceItem && sourceItem.quantity >= amount;
 
-  // Destination capacity tracking
   const dstMaxCapacity = mode === 'demo' ? 0 : dstOnChain?.maxCapacity || 0;
   const hasDstCapacityLimit = dstMaxCapacity > 0 && volumeRegistryId?.startsWith('0x');
   const canTransferWithCapacity = !hasDstCapacityLimit || canDeposit(currentDstSlots, itemId, amount, dstMaxCapacity);
@@ -155,7 +148,6 @@ export function Transfer() {
 
       setProofResult(result);
 
-      // Calculate new inventories
       const newSourceSlots = currentSrcSlots
         .map((s) =>
           s.item_id === itemId ? { ...s, quantity: s.quantity - amount } : s
@@ -247,13 +239,11 @@ export function Transfer() {
       let txResult;
 
       if (useLocalSigner && localAddress) {
-        // Use local signer - no wallet interaction needed!
         console.log('Using local signer for transfer:', localAddress);
         tx.setSender(localAddress);
         const localClient = getLocalnetClient();
         txResult = await signAndExecuteWithLocalSigner(tx, localClient);
       } else if (account) {
-        // Use wallet for signing
         tx.setSender(account.address);
         const signedTx = await signTransaction({
           transaction: tx as unknown as Parameters<typeof signTransaction>[0]['transaction'],
@@ -272,7 +262,6 @@ export function Transfer() {
         setTxDigest(txResult.digest);
         setTransferComplete(true);
 
-        // Update local storage for both inventories
         const stored = JSON.parse(localStorage.getItem('inventory-blindings') || '{}');
         stored[srcOnChain.id] = {
           blinding: srcNewBlinding,
@@ -284,7 +273,6 @@ export function Transfer() {
         };
         localStorage.setItem('inventory-blindings', JSON.stringify(stored));
 
-        // Update local state
         setSrcLocalData({
           blinding: srcNewBlinding,
           slots: newSourceSlots,
@@ -331,16 +319,16 @@ export function Transfer() {
     : srcLocalData?.blinding && dstLocalData?.blinding && srcOnChain && dstOnChain;
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Transfer</h1>
-        <p className="text-gray-600 mt-1">
+    <div className="col">
+      <div className="mb-2">
+        <h1>TRANSFER</h1>
+        <p className="text-muted">
           Transfer items between two private inventories with ZK proofs.
         </p>
       </div>
 
       {/* Mode Toggle */}
-      <div className="flex rounded-lg bg-gray-100 p-1 w-fit">
+      <div className="btn-group mb-2">
         <button
           onClick={() => {
             setMode('demo');
@@ -348,13 +336,9 @@ export function Transfer() {
             setTransferComplete(false);
             setTxDigest(null);
           }}
-          className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-            mode === 'demo'
-              ? 'bg-white shadow text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          className={`btn btn-secondary ${mode === 'demo' ? 'active' : ''}`}
         >
-          Demo Mode
+          [DEMO]
         </button>
         <button
           onClick={() => {
@@ -363,22 +347,18 @@ export function Transfer() {
             setTransferComplete(false);
             setTxDigest(null);
           }}
-          className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-            mode === 'onchain'
-              ? 'bg-white shadow text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          className={`btn btn-secondary ${mode === 'onchain' ? 'active' : ''}`}
         >
-          On-Chain
+          [ON-CHAIN]
         </button>
       </div>
 
       {/* Two inventory panels */}
-      <div className="grid lg:grid-cols-2 gap-6">
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold text-gray-900">Source Inventory</h2>
-            <span className="text-xs text-gray-500">Your inventory</span>
+      <div className="grid grid-2">
+        <div className="col">
+          <div className="row-between mb-1">
+            <span className="text-uppercase">SOURCE INVENTORY</span>
+            <span className="badge">YOUR INVENTORY</span>
           </div>
           {mode === 'demo' ? (
             <InventoryCard
@@ -390,25 +370,32 @@ export function Transfer() {
             />
           ) : (
             <div className="card">
-              <OnChainInventorySelector
-                selectedInventory={srcOnChain}
-                onSelect={(inv, data) => {
-                  setSrcOnChain(inv);
-                  setSrcLocalData(data);
-                  if (data?.slots.length) {
-                    setItemId(data.slots[0].item_id);
-                  }
-                }}
-                label="Source Inventory"
-              />
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">SELECT SOURCE</span>
+                <div className="card-header-right"></div>
+              </div>
+              <div className="card-body">
+                <OnChainInventorySelector
+                  selectedInventory={srcOnChain}
+                  onSelect={(inv, data) => {
+                    setSrcOnChain(inv);
+                    setSrcLocalData(data);
+                    if (data?.slots.length) {
+                      setItemId(data.slots[0].item_id);
+                    }
+                  }}
+                  label="Source Inventory"
+                />
+              </div>
             </div>
           )}
         </div>
 
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-semibold text-gray-900">Destination Inventory</h2>
-            <span className="text-xs text-gray-500">Recipient</span>
+        <div className="col">
+          <div className="row-between mb-1">
+            <span className="text-uppercase">DESTINATION INVENTORY</span>
+            <span className="badge">RECIPIENT</span>
           </div>
           {mode === 'demo' ? (
             <InventoryCard
@@ -418,19 +405,26 @@ export function Transfer() {
             />
           ) : (
             <div className="card">
-              <OnChainInventorySelector
-                selectedInventory={dstOnChain}
-                onSelect={(inv, data) => {
-                  setDstOnChain(inv);
-                  setDstLocalData(data);
-                }}
-                label="Destination Inventory"
-              />
-              {srcOnChain && dstOnChain && srcOnChain.id === dstOnChain.id && (
-                <p className="text-sm text-amber-600 mt-2">
-                  Source and destination cannot be the same inventory.
-                </p>
-              )}
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">SELECT DESTINATION</span>
+                <div className="card-header-right"></div>
+              </div>
+              <div className="card-body">
+                <OnChainInventorySelector
+                  selectedInventory={dstOnChain}
+                  onSelect={(inv, data) => {
+                    setDstOnChain(inv);
+                    setDstLocalData(data);
+                  }}
+                  label="Destination Inventory"
+                />
+                {srcOnChain && dstOnChain && srcOnChain.id === dstOnChain.id && (
+                  <p className="text-small text-warning mt-1">
+                    [!!] Source and destination cannot be the same inventory.
+                  </p>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -438,215 +432,150 @@ export function Transfer() {
 
       {/* Transfer controls */}
       <div className="card">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-900">Transfer Items</h2>
+        <div className="card-header">
+          <div className="card-header-left"></div>
+          <span className="card-title">TRANSFER ITEMS</span>
+          <div className="card-header-right"></div>
+        </div>
+        <div className="card-body">
           {mode === 'demo' && (
-            <button
-              onClick={resetDemo}
-              className="text-sm text-gray-600 hover:text-gray-800"
-            >
-              Reset Demo
-            </button>
+            <div className="row-between mb-2">
+              <span className="text-muted text-small">DEMO MODE</span>
+              <button onClick={resetDemo} className="btn btn-secondary btn-small">
+                [RESET]
+              </button>
+            </div>
+          )}
+
+          {mode === 'demo' && !initialized ? (
+            <div className="text-center">
+              <p className="text-muted mb-2">
+                Initialize both inventories with blinding factors and commitments.
+              </p>
+              <button onClick={initializeBlindings} className="btn btn-primary">
+                [INITIALIZE INVENTORIES]
+              </button>
+            </div>
+          ) : mode === 'onchain' && !initialized ? (
+            <div className="text-center text-muted">
+              Select both source and destination inventories to transfer.
+            </div>
+          ) : (
+            <div className="col">
+              <div className="grid grid-2">
+                <div className="input-group">
+                  <label className="input-label">Item to Transfer</label>
+                  <select
+                    value={itemId}
+                    onChange={(e) => setItemId(Number(e.target.value))}
+                    className="select"
+                    disabled={currentSrcSlots.length === 0}
+                  >
+                    {currentSrcSlots.length === 0 ? (
+                      <option>No items available</option>
+                    ) : (
+                      currentSrcSlots.map((slot) => (
+                        <option key={slot.item_id} value={slot.item_id}>
+                          {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`} ({slot.quantity} available)
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </div>
+
+                <div className="input-group">
+                  <label className="input-label">Amount</label>
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(Number(e.target.value))}
+                    min={1}
+                    max={sourceItem?.quantity || 1}
+                    className="input"
+                  />
+                  {hasDstCapacityLimit && (
+                    <p className="text-small text-muted mt-1">
+                      Volume: {ITEM_VOLUMES[itemId] ?? 0} x {amount} = {(ITEM_VOLUMES[itemId] ?? 0) * amount}
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <button
+                onClick={handleTransfer}
+                disabled={
+                  loading ||
+                  !canTransfer ||
+                  !canTransferWithCapacity ||
+                  (mode === 'onchain' && srcOnChain?.id === dstOnChain?.id)
+                }
+                className="btn btn-primary"
+                style={{ width: '100%' }}
+              >
+                {loading ? 'PROCESSING...' : `[${mode === 'onchain' ? 'TRANSFER ON-CHAIN' : 'TRANSFER'} ->]`}
+              </button>
+            </div>
+          )}
+
+          {!canTransfer && initialized && sourceItem && (
+            <div className="alert alert-error mt-2">
+              [!!] Insufficient balance: only have {sourceItem.quantity}
+            </div>
+          )}
+
+          {!canTransferWithCapacity && initialized && canTransfer && (
+            <div className="alert alert-error mt-2">
+              [!!] Transfer would exceed destination inventory capacity!
+            </div>
+          )}
+
+          {mode === 'onchain' && dstOnChain && dstMaxCapacity > 0 && (
+            <div className="mt-2">
+              <div className="text-small text-muted mb-1">DESTINATION CAPACITY</div>
+              <CapacityBar slots={currentDstSlots} maxCapacity={dstMaxCapacity} />
+              <CapacityPreview
+                currentSlots={currentDstSlots}
+                maxCapacity={dstMaxCapacity}
+                itemId={itemId}
+                amount={amount}
+                isDeposit={true}
+              />
+            </div>
           )}
         </div>
-
-        {mode === 'demo' && !initialized ? (
-          <div className="text-center py-6">
-            <p className="text-gray-600 mb-4">
-              Initialize both inventories with blinding factors and commitments.
-            </p>
-            <button onClick={initializeBlindings} className="btn-primary">
-              Initialize Inventories
-            </button>
-          </div>
-        ) : mode === 'onchain' && !initialized ? (
-          <div className="text-center py-6 text-gray-600">
-            Select both source and destination inventories to transfer.
-          </div>
-        ) : (
-          <div className="flex flex-wrap items-end gap-4">
-            <div className="flex-1 min-w-[150px]">
-              <label className="label">Item to Transfer</label>
-              <select
-                value={itemId}
-                onChange={(e) => setItemId(Number(e.target.value))}
-                className="input"
-                disabled={currentSrcSlots.length === 0}
-              >
-                {currentSrcSlots.length === 0 ? (
-                  <option>No items available</option>
-                ) : (
-                  currentSrcSlots.map((slot) => (
-                    <option key={slot.item_id} value={slot.item_id}>
-                      {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`} ({slot.quantity}{' '}
-                      available)
-                    </option>
-                  ))
-                )}
-              </select>
-            </div>
-
-            <div className="w-32">
-              <label className="label">Amount</label>
-              <input
-                type="number"
-                value={amount}
-                onChange={(e) => setAmount(Number(e.target.value))}
-                min={1}
-                max={sourceItem?.quantity || 1}
-                className="input"
-              />
-              {hasDstCapacityLimit && (
-                <p className="text-xs mt-1 text-gray-500">
-                  Volume: {ITEM_VOLUMES[itemId] ?? 0} × {amount} = {(ITEM_VOLUMES[itemId] ?? 0) * amount}
-                </p>
-              )}
-            </div>
-
-            <button
-              onClick={handleTransfer}
-              disabled={
-                loading ||
-                !canTransfer ||
-                !canTransferWithCapacity ||
-                (mode === 'onchain' && srcOnChain?.id === dstOnChain?.id)
-              }
-              className="btn-primary"
-            >
-              {loading ? (
-                'Processing...'
-              ) : (
-                <>
-                  {mode === 'onchain' ? 'Transfer On-Chain' : 'Transfer'}{' '}
-                  <svg
-                    className="w-4 h-4 inline ml-1"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M13 7l5 5m0 0l-5 5m5-5H6"
-                    />
-                  </svg>
-                </>
-              )}
-            </button>
-          </div>
-        )}
-
-        {!canTransfer && initialized && sourceItem && (
-          <p className="text-sm text-red-600 mt-2">
-            Insufficient balance: only have {sourceItem.quantity}
-          </p>
-        )}
-
-        {!canTransferWithCapacity && initialized && canTransfer && (
-          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-            Transfer would exceed destination inventory capacity!
-          </div>
-        )}
-
-        {/* Destination capacity info for on-chain mode */}
-        {mode === 'onchain' && dstOnChain && dstMaxCapacity > 0 && (
-          <div className="mt-4 space-y-2">
-            <div className="text-xs text-gray-500 font-medium">Destination Capacity</div>
-            <CapacityBar slots={currentDstSlots} maxCapacity={dstMaxCapacity} />
-            <CapacityPreview
-              currentSlots={currentDstSlots}
-              maxCapacity={dstMaxCapacity}
-              itemId={itemId}
-              amount={amount}
-              isDeposit={true}
-            />
-          </div>
-        )}
       </div>
 
       {/* Results */}
       {loading && <ProofLoading message="Generating transfer proof..." />}
-
       {error && <ProofError error={error} onRetry={handleTransfer} />}
 
       {proofResult && (
-        <div className="space-y-4">
-          {/* On-chain success */}
+        <div className="col">
           {txDigest && (
-            <div className="card bg-emerald-50 border-emerald-200">
-              <div className="flex items-center gap-2">
-                <svg
-                  className="w-5 h-5 text-emerald-600"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <span className="font-semibold text-emerald-800">
-                  On-Chain Transfer Successful
-                </span>
-              </div>
-              <p className="text-sm mt-2 text-gray-600">
-                Transfer executed on Sui blockchain with ZK proof verification.
-              </p>
-              <code className="block text-xs bg-emerald-100 rounded p-2 mt-2 break-all">
-                {txDigest}
-              </code>
+            <div className="alert alert-success">
+              <div>[OK] ON-CHAIN TRANSFER SUCCESSFUL</div>
+              <div className="text-small mt-1">Transfer executed on Sui blockchain with ZK proof verification.</div>
+              <code className="text-break text-small">{txDigest}</code>
             </div>
           )}
 
           {transferComplete && !txDigest && (
-            <div className="card bg-emerald-50 border-emerald-200">
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 bg-emerald-500 rounded-full flex items-center justify-center">
-                  <svg
-                    className="w-6 h-6 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="font-semibold text-emerald-800">
-                    Transfer Complete!
-                  </h3>
-                  <p className="text-sm text-emerald-700">
-                    {amount} {ITEM_NAMES[itemId] || `Item #${itemId}`} transferred
-                    from source to destination.
-                  </p>
-                </div>
+            <div className="alert alert-success">
+              <div>[OK] TRANSFER COMPLETE!</div>
+              <div className="text-small">
+                {amount} {ITEM_NAMES[itemId] || `Item #${itemId}`} transferred from source to destination.
               </div>
             </div>
           )}
 
-          <div className="grid lg:grid-cols-2 gap-4">
-            <div className="card">
-              <h3 className="font-medium text-gray-900 mb-2">
-                Source New Commitment
-              </h3>
-              <code className="block text-xs bg-gray-100 rounded p-2 break-all">
-                {proofResult.src_new_commitment}
-              </code>
+          <div className="grid grid-2">
+            <div className="card-simple">
+              <div className="text-small text-muted mb-1">SRC NEW COMMITMENT</div>
+              <code className="text-break text-small">{proofResult.src_new_commitment}</code>
             </div>
-            <div className="card">
-              <h3 className="font-medium text-gray-900 mb-2">
-                Destination New Commitment
-              </h3>
-              <code className="block text-xs bg-gray-100 rounded p-2 break-all">
-                {proofResult.dst_new_commitment}
-              </code>
+            <div className="card-simple">
+              <div className="text-small text-muted mb-1">DST NEW COMMITMENT</div>
+              <code className="text-break text-small">{proofResult.dst_new_commitment}</code>
             </div>
           </div>
 
@@ -654,52 +583,50 @@ export function Transfer() {
             result={proofResult}
             title="Transfer Proof"
             extra={
-              <div className="text-sm text-emerald-700">
-                Proved valid transfer of <strong>{amount}</strong>{' '}
-                <strong>{ITEM_NAMES[itemId] || `Item #${itemId}`}</strong> between
-                inventories. Both old and new states are verified.
+              <div className="text-small text-success">
+                [OK] Proved valid transfer of <strong>{amount}</strong>{' '}
+                <strong>{ITEM_NAMES[itemId] || `Item #${itemId}`}</strong> between inventories.
               </div>
             }
           />
         </div>
       )}
 
-      {/* Info when not started */}
       {!loading && !proofResult && !error && initialized && (
         <div className="card">
-          <h3 className="font-semibold text-gray-900 mb-3">
-            Transfer Proof Verifies
-          </h3>
-          <div className="grid md:grid-cols-2 gap-4">
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">Source</h4>
-              <ul className="space-y-1 text-sm text-gray-600">
-                <li>Old commitment is valid</li>
-                <li>Has sufficient balance</li>
-                <li>New commitment = old - amount</li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-sm font-medium text-gray-700 mb-2">
-                Destination
-              </h4>
-              <ul className="space-y-1 text-sm text-gray-600">
-                <li>Old commitment is valid</li>
-                <li>New commitment = old + amount</li>
-                <li>Same item_id and amount</li>
-              </ul>
-            </div>
+          <div className="card-header">
+            <div className="card-header-left"></div>
+            <span className="card-title">WHAT GETS PROVEN</span>
+            <div className="card-header-right"></div>
           </div>
-          {mode === 'onchain' && (
-            <div className="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-600">
-              Both inventories&apos; commitments will be updated on-chain after ZK proof verification.
-              {hasDstCapacityLimit && (
-                <span className="block mt-1 text-primary-600">
-                  Capacity-aware proof will verify destination doesn&apos;t exceed its volume limit.
-                </span>
-              )}
+          <div className="card-body">
+            <div className="grid grid-2">
+              <div>
+                <div className="text-small text-muted mb-1">SOURCE</div>
+                <div className="col text-small">
+                  <div>[OK] Old commitment is valid</div>
+                  <div>[OK] Has sufficient balance</div>
+                  <div>[OK] New commitment = old - amount</div>
+                </div>
+              </div>
+              <div>
+                <div className="text-small text-muted mb-1">DESTINATION</div>
+                <div className="col text-small">
+                  <div>[OK] Old commitment is valid</div>
+                  <div>[OK] New commitment = old + amount</div>
+                  <div>[OK] Same item_id and amount</div>
+                </div>
+              </div>
             </div>
-          )}
+            {mode === 'onchain' && (
+              <div className="mt-2 text-small text-muted" style={{ borderTop: '1px solid var(--border)', paddingTop: '0.5rem' }}>
+                Both inventories' commitments will be updated on-chain after ZK proof verification.
+                {hasDstCapacityLimit && (
+                  <span className="text-accent"> Capacity-aware proof verifies destination doesn't exceed volume limit.</span>
+                )}
+              </div>
+            )}
+          </div>
         </div>
       )}
     </div>

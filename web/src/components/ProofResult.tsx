@@ -18,89 +18,53 @@ export function ProofResult({ result, title = 'Proof Generated', extra }: ProofR
   };
 
   return (
-    <div className="card border-emerald-200 bg-emerald-50">
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center">
-          <svg
-            className="w-5 h-5 text-white"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M5 13l4 4L19 7"
-            />
-          </svg>
-        </div>
-        <h3 className="font-semibold text-emerald-800">{title}</h3>
+    <div className="proof-result success">
+      <div className="proof-status">
+        <span className="proof-status-icon text-success">[OK]</span>
+        <span className="text-success">{title}</span>
       </div>
 
-      {extra && <div className="mb-4">{extra}</div>}
+      {extra && <div className="mb-2">{extra}</div>}
 
-      <div className="space-y-3">
+      <div className="col">
         <div>
-          <div className="flex items-center justify-between mb-1">
-            <span className="text-xs text-emerald-700 font-medium">
-              Proof ({result.proof.length} bytes)
+          <div className="row-between mb-1">
+            <span className="text-small text-muted">
+              PROOF ({result.proof.length} bytes)
             </span>
-            <button
-              onClick={copyProof}
-              className="text-xs text-emerald-600 hover:text-emerald-800 flex items-center gap-1"
-            >
-              {copied ? (
-                <>
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  Copied!
-                </>
-              ) : (
-                <>
-                  <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                    <path d="M8 3a1 1 0 011-1h2a1 1 0 110 2H9a1 1 0 01-1-1z" />
-                    <path d="M6 3a2 2 0 00-2 2v11a2 2 0 002 2h8a2 2 0 002-2V5a2 2 0 00-2-2 3 3 0 01-3 3H9a3 3 0 01-3-3z" />
-                  </svg>
-                  Copy
-                </>
-              )}
+            <button onClick={copyProof} className="btn btn-secondary btn-small">
+              {copied ? '[COPIED]' : '[COPY]'}
             </button>
           </div>
-          <div className="relative">
+          <div>
             <code
-              className={`block text-xs bg-white rounded p-2 break-all text-gray-700 border border-emerald-200 ${
-                expanded ? '' : 'line-clamp-2'
-              }`}
+              className={`text-small text-break ${expanded ? '' : ''}`}
+              style={{
+                display: 'block',
+                maxHeight: expanded ? 'none' : '3em',
+                overflow: 'hidden',
+              }}
             >
               {result.proof}
             </code>
             {result.proof.length > 100 && (
               <button
                 onClick={() => setExpanded(!expanded)}
-                className="text-xs text-emerald-600 hover:text-emerald-800 mt-1"
+                className="btn btn-secondary btn-small mt-1"
               >
-                {expanded ? 'Show less' : 'Show more'}
+                {expanded ? '[LESS]' : '[MORE]'}
               </button>
             )}
           </div>
         </div>
 
         <div>
-          <div className="text-xs text-emerald-700 font-medium mb-1">
-            Public Inputs ({result.public_inputs.length})
+          <div className="text-small text-muted mb-1">
+            PUBLIC INPUTS ({result.public_inputs.length})
           </div>
-          <div className="space-y-1">
+          <div className="col">
             {result.public_inputs.map((input, i) => (
-              <code
-                key={i}
-                className="block text-xs bg-white rounded p-2 break-all text-gray-700 border border-emerald-200"
-              >
+              <code key={i} className="text-small text-break" style={{ background: 'var(--bg-secondary)', padding: '0.25rem 0.5ch' }}>
                 [{i}] {input}
               </code>
             ))}
@@ -117,14 +81,12 @@ interface ProofLoadingProps {
 
 export function ProofLoading({ message = 'Generating proof...' }: ProofLoadingProps) {
   return (
-    <div className="card border-primary-200 bg-primary-50">
-      <div className="flex items-center gap-3">
-        <div className="w-8 h-8 border-2 border-primary-500 border-t-transparent rounded-full animate-spin" />
+    <div className="card-simple" style={{ background: 'var(--accent-subdued)' }}>
+      <div className="row">
+        <span className="loading text-accent">[...]</span>
         <div>
-          <div className="font-medium text-primary-800">{message}</div>
-          <div className="text-xs text-primary-600">
-            This may take a few seconds...
-          </div>
+          <div className="text-accent">{message}</div>
+          <div className="text-small text-muted">This may take a few seconds...</div>
         </div>
       </div>
     </div>
@@ -138,29 +100,15 @@ interface ProofErrorProps {
 
 export function ProofError({ error, onRetry }: ProofErrorProps) {
   return (
-    <div className="card border-red-200 bg-red-50">
-      <div className="flex items-center gap-2 mb-2">
-        <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center">
-          <svg
-            className="w-5 h-5 text-white"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-          >
-            <path
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              strokeWidth={2}
-              d="M6 18L18 6M6 6l12 12"
-            />
-          </svg>
-        </div>
-        <h3 className="font-semibold text-red-800">Proof Failed</h3>
+    <div className="proof-result error">
+      <div className="proof-status">
+        <span className="proof-status-icon text-error">[ERR]</span>
+        <span className="text-error">Proof Failed</span>
       </div>
-      <p className="text-sm text-red-700 mb-3">{error}</p>
+      <p className="text-small mb-2">{error}</p>
       {onRetry && (
-        <button onClick={onRetry} className="btn-danger text-sm">
-          Try Again
+        <button onClick={onRetry} className="btn btn-danger btn-small">
+          [TRY AGAIN]
         </button>
       )}
     </div>

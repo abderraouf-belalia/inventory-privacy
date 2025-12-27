@@ -25,7 +25,7 @@ export function CreateInventory() {
       return;
     }
     if (maxCapacity > 0 && !canDeposit(inventory.slots, newItemId, newQuantity, maxCapacity)) {
-      return; // Would exceed capacity
+      return;
     }
     addSlot(newItemId, newQuantity);
     setShowAddForm(false);
@@ -38,173 +38,180 @@ export function CreateInventory() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Create Inventory</h1>
-        <p className="text-gray-600 mt-1">
+    <div className="col">
+      <div className="mb-2">
+        <h1>CREATE INVENTORY</h1>
+        <p className="text-muted">
           Build your private inventory and generate a commitment.
         </p>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid grid-2">
         {/* Left: Inventory builder */}
-        <div className="space-y-4">
+        <div className="col">
           {/* Capacity Configuration */}
           <div className="card">
-            <h2 className="font-semibold text-gray-900 mb-4">Capacity Settings</h2>
-            <div>
-              <label className="label">Max Capacity (0 = unlimited)</label>
-              <input
-                type="number"
-                value={maxCapacity}
-                onChange={(e) => setMaxCapacity(Number(e.target.value))}
-                min={0}
-                className="input"
-                placeholder="Enter max volume capacity"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Each item has a volume. Total volume must not exceed capacity.
-              </p>
+            <div className="card-header">
+              <div className="card-header-left"></div>
+              <span className="card-title">CAPACITY</span>
+              <div className="card-header-right"></div>
             </div>
-            <CapacityBar
-              slots={inventory.slots}
-              maxCapacity={maxCapacity}
-              className="mt-4"
-            />
+            <div className="card-body">
+              <div className="input-group">
+                <label className="input-label">Max Capacity (0 = unlimited)</label>
+                <input
+                  type="number"
+                  value={maxCapacity}
+                  onChange={(e) => setMaxCapacity(Number(e.target.value))}
+                  min={0}
+                  className="input"
+                  placeholder="Enter max volume capacity"
+                />
+                <p className="text-small text-muted mt-1">
+                  Each item has a volume. Total volume must not exceed capacity.
+                </p>
+              </div>
+              <CapacityBar slots={inventory.slots} maxCapacity={maxCapacity} />
+            </div>
           </div>
 
           <div className="card">
-            <h2 className="font-semibold text-gray-900 mb-4">Add Items</h2>
-
-            {showAddForm ? (
-              <div className="space-y-4">
-                <div>
-                  <label className="label">Item Type</label>
-                  <select
-                    value={newItemId}
-                    onChange={(e) => setNewItemId(Number(e.target.value))}
-                    className="input"
-                  >
-                    {Object.entries(ITEM_NAMES).map(([id, name]) => (
-                      <option key={id} value={id}>
-                        {name} (#{id})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="label">Quantity</label>
-                  <input
-                    type="number"
-                    value={newQuantity}
-                    onChange={(e) => setNewQuantity(Number(e.target.value))}
-                    min={1}
-                    className="input"
-                  />
-                </div>
-
-                {/* Volume preview */}
-                <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
-                  Volume: {ITEM_VOLUMES[newItemId] ?? 0} x {newQuantity} = {(ITEM_VOLUMES[newItemId] ?? 0) * newQuantity}
-                </div>
-
-                {wouldExceedCapacity && (
-                  <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
-                    Adding this item would exceed capacity!
-                  </div>
-                )}
-
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleAddItem}
-                    disabled={wouldExceedCapacity}
-                    className={`flex-1 ${wouldExceedCapacity ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}`}
-                  >
-                    Add Item
-                  </button>
-                  <button
-                    onClick={() => setShowAddForm(false)}
-                    className="btn-secondary"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <button
-                onClick={() => setShowAddForm(true)}
-                disabled={inventory.slots.length >= MAX_ITEM_SLOTS}
-                className="btn-secondary w-full"
-              >
-                + Add Item ({inventory.slots.length}/{MAX_ITEM_SLOTS})
-              </button>
-            )}
-
-            {inventory.slots.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <div className="text-sm text-gray-600 mb-2">Current Items</div>
-                <div className="space-y-2">
-                  {inventory.slots.map((slot, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center justify-between p-2 bg-gray-50 rounded"
+            <div className="card-header">
+              <div className="card-header-left"></div>
+              <span className="card-title">ADD ITEMS</span>
+              <div className="card-header-right"></div>
+            </div>
+            <div className="card-body">
+              {showAddForm ? (
+                <div className="col">
+                  <div className="input-group">
+                    <label className="input-label">Item Type</label>
+                    <select
+                      value={newItemId}
+                      onChange={(e) => setNewItemId(Number(e.target.value))}
+                      className="select"
                     >
-                      <span className="text-sm">
-                        {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`}:{' '}
-                        <strong>{slot.quantity}</strong>
-                        <span className="text-gray-400 ml-2">
-                          ({(ITEM_VOLUMES[slot.item_id] ?? 0) * slot.quantity} vol)
-                        </span>
-                      </span>
-                      <button
-                        onClick={() => removeSlot(i)}
-                        className="text-red-600 hover:text-red-800 text-sm"
-                      >
-                        Remove
-                      </button>
+                      {Object.entries(ITEM_NAMES).map(([id, name]) => (
+                        <option key={id} value={id}>
+                          {name} (#{id})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div className="input-group">
+                    <label className="input-label">Quantity</label>
+                    <input
+                      type="number"
+                      value={newQuantity}
+                      onChange={(e) => setNewQuantity(Number(e.target.value))}
+                      min={1}
+                      className="input"
+                    />
+                  </div>
+
+                  <div className="badge">
+                    Volume: {ITEM_VOLUMES[newItemId] ?? 0} x {newQuantity} = {(ITEM_VOLUMES[newItemId] ?? 0) * newQuantity}
+                  </div>
+
+                  {wouldExceedCapacity && (
+                    <div className="alert alert-error">
+                      [!!] Adding this item would exceed capacity!
                     </div>
-                  ))}
+                  )}
+
+                  <div className="row">
+                    <button
+                      onClick={handleAddItem}
+                      disabled={wouldExceedCapacity}
+                      className="btn btn-primary"
+                    >
+                      [ADD]
+                    </button>
+                    <button
+                      onClick={() => setShowAddForm(false)}
+                      className="btn btn-secondary"
+                    >
+                      [CANCEL]
+                    </button>
+                  </div>
                 </div>
-              </div>
-            )}
-          </div>
-
-          <div className="card">
-            <h2 className="font-semibold text-gray-900 mb-4">
-              Generate Commitment
-            </h2>
-
-            <div className="space-y-4">
-              <button
-                onClick={handleGenerateAndCommit}
-                disabled={loading || inventory.slots.length === 0}
-                className="btn-primary w-full"
-              >
-                {loading ? 'Generating...' : '1. Generate Blinding Factor'}
-              </button>
-
-              {inventory.blinding && (
+              ) : (
                 <button
-                  onClick={createCommitment}
-                  disabled={loading}
-                  className="btn-success w-full"
+                  onClick={() => setShowAddForm(true)}
+                  disabled={inventory.slots.length >= MAX_ITEM_SLOTS}
+                  className="btn btn-secondary"
+                  style={{ width: '100%' }}
                 >
-                  {loading ? 'Creating...' : '2. Create Commitment'}
+                  [+] ADD ITEM ({inventory.slots.length}/{MAX_ITEM_SLOTS})
                 </button>
               )}
-            </div>
 
-            {error && (
-              <div className="mt-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                {error}
+              {inventory.slots.length > 0 && (
+                <div className="mt-2" style={{ borderTop: '1px solid var(--border)', paddingTop: '1rem' }}>
+                  <div className="text-small text-muted mb-1">CURRENT ITEMS</div>
+                  <div className="col">
+                    {inventory.slots.map((slot, i) => (
+                      <div key={i} className="row-between" style={{ background: 'var(--bg-secondary)', padding: '0.5rem 1ch' }}>
+                        <span className="text-small">
+                          {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`}:{' '}
+                          <span className="text-accent">{slot.quantity}</span>
+                          <span className="text-muted"> ({(ITEM_VOLUMES[slot.item_id] ?? 0) * slot.quantity} vol)</span>
+                        </span>
+                        <button
+                          onClick={() => removeSlot(i)}
+                          className="btn btn-danger btn-small"
+                        >
+                          [X]
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="card">
+            <div className="card-header">
+              <div className="card-header-left"></div>
+              <span className="card-title">COMMITMENT</span>
+              <div className="card-header-right"></div>
+            </div>
+            <div className="card-body">
+              <div className="col">
+                <button
+                  onClick={handleGenerateAndCommit}
+                  disabled={loading || inventory.slots.length === 0}
+                  className="btn btn-primary"
+                  style={{ width: '100%' }}
+                >
+                  {loading ? 'GENERATING...' : '[1] GENERATE BLINDING FACTOR'}
+                </button>
+
+                {inventory.blinding && (
+                  <button
+                    onClick={createCommitment}
+                    disabled={loading}
+                    className="btn btn-success"
+                    style={{ width: '100%' }}
+                  >
+                    {loading ? 'CREATING...' : '[2] CREATE COMMITMENT'}
+                  </button>
+                )}
               </div>
-            )}
+
+              {error && (
+                <div className="alert alert-error mt-2">
+                  [ERR] {error}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {/* Right: Preview */}
-        <div className="space-y-4">
+        <div className="col">
           <InventoryCard
             title="Your Private Inventory"
             slots={inventory.slots}
@@ -219,89 +226,34 @@ export function CreateInventory() {
           />
 
           {inventory.commitment && (
-            <div className="card bg-emerald-50 border-emerald-200">
-              <div className="flex items-start gap-3">
-                <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center flex-shrink-0">
-                  <svg
-                    className="w-5 h-5 text-white"
-                    fill="none"
-                    viewBox="0 0 24 24"
-                    stroke="currentColor"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 13l4 4L19 7"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <h3 className="font-semibold text-emerald-800">
-                    Commitment Created!
-                  </h3>
-                  <p className="text-sm text-emerald-700 mt-1">
-                    Your inventory is now private. Only the commitment hash would
-                    be stored on-chain. Keep your blinding factor secret!
-                  </p>
-                </div>
+            <div className="alert alert-success">
+              <div className="mb-1">[OK] COMMITMENT CREATED!</div>
+              <div className="text-small">
+                Your inventory is now private. Only the commitment hash would
+                be stored on-chain. Keep your blinding factor secret!
               </div>
             </div>
           )}
 
-          {/* What's public vs private */}
           <div className="card">
-            <h3 className="font-semibold text-gray-900 mb-3">
-              Privacy Breakdown
-            </h3>
-            <div className="space-y-3">
-              <div className="flex items-start gap-2">
-                <div className="w-5 h-5 bg-emerald-100 rounded flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <svg
-                    className="w-3 h-3 text-emerald-600"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-gray-900">
-                    On-chain (Public)
-                  </div>
-                  <div className="text-xs text-gray-600">
-                    Only the 32-byte commitment hash
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-start gap-2">
-                <div className="w-5 h-5 bg-red-100 rounded flex items-center justify-center flex-shrink-0 mt-0.5">
-                  <svg
-                    className="w-3 h-3 text-red-600"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M3.707 2.293a1 1 0 00-1.414 1.414l14 14a1 1 0 001.414-1.414l-1.473-1.473A10.014 10.014 0 0019.542 10C18.268 5.943 14.478 3 10 3a9.958 9.958 0 00-4.512 1.074l-1.78-1.781zm4.261 4.26l1.514 1.515a2.003 2.003 0 012.45 2.45l1.514 1.514a4 4 0 00-5.478-5.478z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                </div>
-                <div>
-                  <div className="text-sm font-medium text-gray-900">
-                    Off-chain (Secret)
-                  </div>
-                  <div className="text-xs text-gray-600">
-                    Inventory contents, quantities, blinding factor
-                  </div>
-                </div>
-              </div>
+            <div className="card-header">
+              <div className="card-header-left"></div>
+              <span className="card-title">PRIVACY BREAKDOWN</span>
+              <div className="card-header-right"></div>
+            </div>
+            <div className="card-body">
+              <table className="data-table">
+                <tbody>
+                  <tr>
+                    <td className="table-key text-success">[PUBLIC]</td>
+                    <td className="table-value">32-byte commitment hash only</td>
+                  </tr>
+                  <tr>
+                    <td className="table-key text-error">[SECRET]</td>
+                    <td className="table-value">Inventory contents, quantities, blinding factor</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
         </div>

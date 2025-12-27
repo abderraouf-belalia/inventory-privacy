@@ -24,19 +24,16 @@ export function ProveOwnership() {
   const client = useSuiClient();
   const { packageId, verifyingKeysId } = useContractAddresses();
 
-  // Demo mode state
   const { inventory, generateBlinding, setSlots } = useInventory([
     { item_id: 1, quantity: 100 },
     { item_id: 2, quantity: 50 },
   ]);
 
-  // On-chain mode state
   const [mode, setMode] = useState<Mode>('demo');
   const [selectedOnChainInventory, setSelectedOnChainInventory] =
     useState<OnChainInventory | null>(null);
   const [localData, setLocalData] = useState<LocalInventoryData | null>(null);
 
-  // Shared state
   const [selectedItemId, setSelectedItemId] = useState(1);
   const [minQuantity, setMinQuantity] = useState(50);
   const [proofResult, setProofResult] = useState<ProofResultType | null>(null);
@@ -44,7 +41,6 @@ export function ProveOwnership() {
   const [error, setError] = useState<string | null>(null);
   const [onChainVerified, setOnChainVerified] = useState<boolean | null>(null);
 
-  // Get current slots based on mode
   const currentSlots = mode === 'demo' ? inventory.slots : localData?.slots || [];
   const currentBlinding = mode === 'demo' ? inventory.blinding : localData?.blinding;
 
@@ -76,7 +72,6 @@ export function ProveOwnership() {
     setOnChainVerified(null);
 
     try {
-      // Generate proof via proof server
       const result = await api.proveItemExists(
         currentSlots,
         currentBlinding,
@@ -85,7 +80,6 @@ export function ProveOwnership() {
       );
       setProofResult(result);
 
-      // If on-chain mode, verify on-chain
       if (mode === 'onchain' && selectedOnChainInventory && account) {
         await verifyOnChain(result);
       }
@@ -110,19 +104,14 @@ export function ProveOwnership() {
         BigInt(minQuantity)
       );
 
-      // Use dev-inspect to verify without executing (read-only check)
-      // No wallet signature needed - dev-inspect simulates the transaction
       const devInspectResult = await client.devInspectTransactionBlock({
         transactionBlock: tx as unknown as Parameters<typeof client.devInspectTransactionBlock>[0]['transactionBlock'],
         sender: account.address,
       });
 
-      // Check if verification returned true
       const returnValues = devInspectResult.results?.[0]?.returnValues;
       if (returnValues && returnValues.length > 0) {
-        // The bool is returned as the last value
         const boolResult = returnValues[returnValues.length - 1];
-        // boolResult[0] is the bytes, [1] is true for bool type
         const verified = boolResult[0][0] === 1;
         setOnChainVerified(verified);
       }
@@ -146,29 +135,25 @@ export function ProveOwnership() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Prove Ownership</h1>
-        <p className="text-gray-600 mt-1">
+    <div className="col">
+      <div className="mb-2">
+        <h1>PROVE OWNERSHIP</h1>
+        <p className="text-muted">
           Prove you have at least N items without revealing your actual quantity.
         </p>
       </div>
 
       {/* Mode Toggle */}
-      <div className="flex rounded-lg bg-gray-100 p-1 w-fit">
+      <div className="btn-group mb-2">
         <button
           onClick={() => {
             setMode('demo');
             setProofResult(null);
             setOnChainVerified(null);
           }}
-          className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-            mode === 'demo'
-              ? 'bg-white shadow text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          className={`btn btn-secondary ${mode === 'demo' ? 'active' : ''}`}
         >
-          Demo Mode
+          [DEMO]
         </button>
         <button
           onClick={() => {
@@ -176,72 +161,74 @@ export function ProveOwnership() {
             setProofResult(null);
             setOnChainVerified(null);
           }}
-          className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-            mode === 'onchain'
-              ? 'bg-white shadow text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          className={`btn btn-secondary ${mode === 'onchain' ? 'active' : ''}`}
         >
-          On-Chain
+          [ON-CHAIN]
         </button>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid grid-2">
         {/* Left: Configuration */}
-        <div className="space-y-4">
+        <div className="col">
           {mode === 'demo' ? (
             <div className="card">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-gray-900">Demo Inventory</h2>
-                <button
-                  onClick={loadSampleInventory}
-                  className="text-sm text-primary-600 hover:text-primary-800"
-                >
-                  Load Sample
-                </button>
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">DEMO INVENTORY</span>
+                <div className="card-header-right"></div>
               </div>
+              <div className="card-body">
+                <div className="row-between mb-2">
+                  <span className="text-small text-muted">SAMPLE DATA</span>
+                  <button onClick={loadSampleInventory} className="btn btn-secondary btn-small">
+                    [LOAD]
+                  </button>
+                </div>
 
-              <InventoryCard
-                title=""
-                slots={inventory.slots}
-                commitment={null}
-                onSlotClick={(_, slot) => setSelectedItemId(slot.item_id)}
-                selectedSlot={inventory.slots.findIndex(
-                  (s) => s.item_id === selectedItemId
+                <InventoryCard
+                  title=""
+                  slots={inventory.slots}
+                  commitment={null}
+                  onSlotClick={(_, slot) => setSelectedItemId(slot.item_id)}
+                  selectedSlot={inventory.slots.findIndex((s) => s.item_id === selectedItemId)}
+                />
+
+                {!inventory.blinding && (
+                  <button onClick={generateBlinding} className="btn btn-primary mt-2" style={{ width: '100%' }}>
+                    [GENERATE BLINDING]
+                  </button>
                 )}
-              />
-
-              {!inventory.blinding && (
-                <button
-                  onClick={generateBlinding}
-                  className="btn-primary w-full mt-4"
-                >
-                  Generate Blinding Factor
-                </button>
-              )}
+              </div>
             </div>
           ) : (
             <div className="card">
-              <h2 className="font-semibold text-gray-900 mb-4">
-                On-Chain Inventory
-              </h2>
-              <OnChainInventorySelector
-                selectedInventory={selectedOnChainInventory}
-                onSelect={handleInventorySelect}
-              />
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">ON-CHAIN INVENTORY</span>
+                <div className="card-header-right"></div>
+              </div>
+              <div className="card-body">
+                <OnChainInventorySelector
+                  selectedInventory={selectedOnChainInventory}
+                  onSelect={handleInventorySelect}
+                />
+              </div>
             </div>
           )}
 
           <div className="card">
-            <h2 className="font-semibold text-gray-900 mb-4">Proof Parameters</h2>
-
-            <div className="space-y-4">
-              <div>
-                <label className="label">Item to Prove</label>
+            <div className="card-header">
+              <div className="card-header-left"></div>
+              <span className="card-title">PROOF PARAMETERS</span>
+              <div className="card-header-right"></div>
+            </div>
+            <div className="card-body">
+              <div className="input-group">
+                <label className="input-label">Item to Prove</label>
                 <select
                   value={selectedItemId}
                   onChange={(e) => setSelectedItemId(Number(e.target.value))}
-                  className="input"
+                  className="select"
                   disabled={currentSlots.length === 0}
                 >
                   {currentSlots.length === 0 ? (
@@ -249,16 +236,15 @@ export function ProveOwnership() {
                   ) : (
                     currentSlots.map((slot) => (
                       <option key={slot.item_id} value={slot.item_id}>
-                        {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`} (you
-                        have {slot.quantity})
+                        {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`} (you have {slot.quantity})
                       </option>
                     ))
                   )}
                 </select>
               </div>
 
-              <div>
-                <label className="label">Minimum Quantity to Prove</label>
+              <div className="input-group">
+                <label className="input-label">Minimum Quantity to Prove</label>
                 <input
                   type="number"
                   value={minQuantity}
@@ -267,16 +253,10 @@ export function ProveOwnership() {
                   className="input"
                 />
                 {selectedItem && (
-                  <p
-                    className={`text-xs mt-1 ${
-                      selectedItem.quantity >= minQuantity
-                        ? 'text-emerald-600'
-                        : 'text-red-600'
-                    }`}
-                  >
+                  <p className={`text-small mt-1 ${selectedItem.quantity >= minQuantity ? 'text-success' : 'text-error'}`}>
                     {selectedItem.quantity >= minQuantity
-                      ? `You have ${selectedItem.quantity}, proof will succeed`
-                      : `You only have ${selectedItem.quantity}, proof will fail`}
+                      ? `[OK] You have ${selectedItem.quantity}, proof will succeed`
+                      : `[!!] You only have ${selectedItem.quantity}, proof will fail`}
                   </p>
                 )}
               </div>
@@ -284,101 +264,53 @@ export function ProveOwnership() {
               <button
                 onClick={handleProve}
                 disabled={loading || !canProve}
-                className="btn-primary w-full"
+                className="btn btn-primary"
+                style={{ width: '100%' }}
               >
                 {loading
-                  ? 'Generating Proof...'
+                  ? 'GENERATING...'
                   : mode === 'onchain'
-                  ? 'Generate & Verify On-Chain'
-                  : 'Generate Proof'}
+                  ? '[PROVE & VERIFY ON-CHAIN]'
+                  : '[GENERATE PROOF]'}
               </button>
             </div>
           </div>
         </div>
 
         {/* Right: Results */}
-        <div className="space-y-4">
+        <div className="col">
           {/* What will be proven */}
-          <div className="card bg-primary-50 border-primary-200">
-            <h3 className="font-semibold text-primary-800 mb-2">
-              What This Proves
-            </h3>
-            <p className="text-sm text-primary-700">
-              "I have at least{' '}
-              <strong className="text-primary-900">{minQuantity}</strong> of{' '}
-              <strong className="text-primary-900">
-                {ITEM_NAMES[selectedItemId] || `Item #${selectedItemId}`}
-              </strong>
-              "
+          <div className="card-simple" style={{ background: 'var(--accent-subdued)' }}>
+            <div className="text-accent mb-1">WHAT THIS PROVES</div>
+            <p className="text-small">
+              "I have at least <strong>{minQuantity}</strong> of{' '}
+              <strong>{ITEM_NAMES[selectedItemId] || `Item #${selectedItemId}`}</strong>"
             </p>
-            <div className="mt-3 pt-3 border-t border-primary-200">
-              <div className="text-xs text-primary-600">
-                <strong>Revealed:</strong> commitment, item_id, min_quantity
-              </div>
-              <div className="text-xs text-primary-600">
-                <strong>Hidden:</strong> actual quantity ({selectedItem?.quantity}
-                ), other items, blinding factor
-              </div>
+            <div className="divider"></div>
+            <div className="text-small text-muted">
+              <div>REVEALED: commitment, item_id, min_quantity</div>
+              <div>HIDDEN: actual qty ({selectedItem?.quantity}), other items, blinding</div>
             </div>
           </div>
 
           {/* On-chain verification result */}
           {onChainVerified !== null && (
-            <div
-              className={`card ${
-                onChainVerified
-                  ? 'bg-emerald-50 border-emerald-200'
-                  : 'bg-red-50 border-red-200'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                {onChainVerified ? (
-                  <>
-                    <svg
-                      className="w-5 h-5 text-emerald-600"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="font-semibold text-emerald-800">
-                      On-Chain Verification Passed
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <svg
-                      className="w-5 h-5 text-red-600"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span className="font-semibold text-red-800">
-                      On-Chain Verification Failed
-                    </span>
-                  </>
-                )}
-              </div>
-              <p className="text-sm mt-2 text-gray-600">
-                {onChainVerified
-                  ? 'The ZK proof was verified on Sui blockchain using Groth16 verification.'
-                  : 'The proof did not pass on-chain verification.'}
-              </p>
+            <div className={`alert ${onChainVerified ? 'alert-success' : 'alert-error'}`}>
+              {onChainVerified ? (
+                <>
+                  <div>[OK] ON-CHAIN VERIFICATION PASSED</div>
+                  <div className="text-small">The ZK proof was verified on Sui blockchain using Groth16 verification.</div>
+                </>
+              ) : (
+                <>
+                  <div>[!!] ON-CHAIN VERIFICATION FAILED</div>
+                  <div className="text-small">The proof did not pass on-chain verification.</div>
+                </>
+              )}
             </div>
           )}
 
-          {/* Results */}
           {loading && <ProofLoading message="Generating item existence proof..." />}
-
           {error && <ProofError error={error} onRetry={handleProve} />}
 
           {proofResult && (
@@ -386,61 +318,30 @@ export function ProveOwnership() {
               result={proofResult}
               title="Ownership Proof Generated"
               extra={
-                <div className="text-sm text-emerald-700">
-                  Successfully proved ownership of{' '}
-                  <strong>
-                    {ITEM_NAMES[selectedItemId] || `Item #${selectedItemId}`}
-                  </strong>{' '}
-                  without revealing you have{' '}
-                  <strong>{selectedItem?.quantity}</strong> (only proved{' '}
-                  <strong>{minQuantity}</strong>).
+                <div className="text-small text-success">
+                  [OK] Proved ownership of{' '}
+                  <strong>{ITEM_NAMES[selectedItemId] || `Item #${selectedItemId}`}</strong>{' '}
+                  without revealing you have <strong>{selectedItem?.quantity}</strong>.
                 </div>
               }
             />
           )}
 
-          {/* How it works */}
           {!loading && !proofResult && !error && (
             <div className="card">
-              <h3 className="font-semibold text-gray-900 mb-3">How It Works</h3>
-              <ol className="space-y-2 text-sm text-gray-600">
-                <li className="flex items-start gap-2">
-                  <span className="bg-gray-200 rounded-full w-5 h-5 flex items-center justify-center text-xs flex-shrink-0">
-                    1
-                  </span>
-                  <span>
-                    The circuit computes your inventory commitment and verifies
-                    it matches
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="bg-gray-200 rounded-full w-5 h-5 flex items-center justify-center text-xs flex-shrink-0">
-                    2
-                  </span>
-                  <span>
-                    It checks that the specified item exists with quantity{' '}
-                    {'>'}{' '}= minimum
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="bg-gray-200 rounded-full w-5 h-5 flex items-center justify-center text-xs flex-shrink-0">
-                    3
-                  </span>
-                  <span>
-                    A Groth16 proof is generated proving both constraints
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <span className="bg-gray-200 rounded-full w-5 h-5 flex items-center justify-center text-xs flex-shrink-0">
-                    4
-                  </span>
-                  <span>
-                    {mode === 'onchain'
-                      ? 'The proof is verified on Sui blockchain'
-                      : 'Anyone can verify the proof without learning actual quantities'}
-                  </span>
-                </li>
-              </ol>
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">HOW IT WORKS</span>
+                <div className="card-header-right"></div>
+              </div>
+              <div className="card-body">
+                <div className="col">
+                  <div className="text-small">[1] Circuit computes inventory commitment and verifies it matches</div>
+                  <div className="text-small">[2] Checks that specified item exists with qty {'>'}{' '}= minimum</div>
+                  <div className="text-small">[3] Groth16 proof is generated proving both constraints</div>
+                  <div className="text-small">[4] {mode === 'onchain' ? 'Proof is verified on Sui blockchain' : 'Anyone can verify without learning actual quantities'}</div>
+                </div>
+              </div>
             </div>
           )}
         </div>

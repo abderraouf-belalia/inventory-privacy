@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react';
 import { useSuiClientContext } from '@mysten/dapp-kit';
 import { useNetworkVariables } from './config';
 
-// Store contract addresses in localStorage per network
 const STORAGE_KEY = 'inventory-privacy-contracts';
 
 interface ContractAddresses {
@@ -37,7 +36,6 @@ export function useContractAddresses(): ContractAddresses {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
-  // Use localStorage values if set, otherwise fall back to config defaults
   const stored = addresses[network] || { packageId: '', verifyingKeysId: '', volumeRegistryId: '' };
 
   return {
@@ -56,11 +54,9 @@ export function ContractConfigPanel() {
   const [volumeRegistryId, setVolumeRegistryId] = useState('');
   const [saved, setSaved] = useState(false);
 
-  // Only update form when network changes, not on every render
   useEffect(() => {
     const storedAddresses = loadAddresses();
     const stored = storedAddresses[network] || { packageId: '', verifyingKeysId: '', volumeRegistryId: '' };
-    // Show stored values or config defaults
     setPackageId(stored.packageId || configVars.packageId || '');
     setVerifyingKeysId(stored.verifyingKeysId || configVars.verifyingKeysId || '');
     setVolumeRegistryId(stored.volumeRegistryId || configVars.volumeRegistryId || '');
@@ -77,7 +73,6 @@ export function ContractConfigPanel() {
     saveAddresses(newAddresses);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
-    // Trigger storage event for other components
     window.dispatchEvent(new Event('storage'));
   };
 
@@ -85,94 +80,83 @@ export function ContractConfigPanel() {
 
   return (
     <div className="card">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-semibold text-gray-900">Contract Configuration</h2>
-        <span
-          className={`text-xs px-2 py-1 rounded-full ${
-            isConfigured
-              ? 'bg-emerald-100 text-emerald-700'
-              : 'bg-amber-100 text-amber-700'
-          }`}
-        >
-          {isConfigured ? 'Configured' : 'Not Configured'}
-        </span>
+      <div className="card-header">
+        <div className="card-header-left"></div>
+        <span className="card-title">CONTRACT CONFIG</span>
+        <div className="card-header-right"></div>
       </div>
-
-      <p className="text-sm text-gray-600 mb-4">
-        Enter the contract addresses after deploying to {network}. These are saved
-        locally in your browser.
-      </p>
-
-      <div className="space-y-4">
-        <div>
-          <label className="label">Package ID</label>
-          <input
-            type="text"
-            value={packageId}
-            onChange={(e) => setPackageId(e.target.value)}
-            placeholder="0x..."
-            className="input font-mono text-sm"
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            The published package ID from `sui client publish`
-          </p>
+      <div className="card-body">
+        <div className="row-between mb-2">
+          <span className="text-small text-muted">STATUS</span>
+          <span className={`badge ${isConfigured ? 'badge-success' : 'badge-warning'}`}>
+            {isConfigured ? '[CONFIGURED]' : '[NOT CONFIGURED]'}
+          </span>
         </div>
 
-        <div>
-          <label className="label">Verifying Keys Object ID</label>
-          <input
-            type="text"
-            value={verifyingKeysId}
-            onChange={(e) => setVerifyingKeysId(e.target.value)}
-            placeholder="0x..."
-            className="input font-mono text-sm"
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            The VerifyingKeys shared object created during initialization
-          </p>
+        <p className="text-small text-muted mb-2">
+          Enter contract addresses after deploying to {network}. Saved locally in browser.
+        </p>
+
+        <div className="col">
+          <div className="input-group">
+            <label className="input-label">Package ID</label>
+            <input
+              type="text"
+              value={packageId}
+              onChange={(e) => setPackageId(e.target.value)}
+              placeholder="0x..."
+              className="input"
+            />
+            <p className="text-small text-muted">Published package ID from `sui client publish`</p>
+          </div>
+
+          <div className="input-group">
+            <label className="input-label">Verifying Keys Object ID</label>
+            <input
+              type="text"
+              value={verifyingKeysId}
+              onChange={(e) => setVerifyingKeysId(e.target.value)}
+              placeholder="0x..."
+              className="input"
+            />
+            <p className="text-small text-muted">VerifyingKeys shared object from init</p>
+          </div>
+
+          <div className="input-group">
+            <label className="input-label">Volume Registry Object ID (optional)</label>
+            <input
+              type="text"
+              value={volumeRegistryId}
+              onChange={(e) => setVolumeRegistryId(e.target.value)}
+              placeholder="0x..."
+              className="input"
+            />
+            <p className="text-small text-muted">Required for capacity-aware operations</p>
+          </div>
+
+          <button
+            onClick={handleSave}
+            disabled={!packageId || !verifyingKeysId}
+            className="btn btn-primary"
+            style={{ width: '100%' }}
+          >
+            {saved ? '[SAVED]' : '[SAVE CONFIG]'}
+          </button>
         </div>
 
-        <div>
-          <label className="label">Volume Registry Object ID (optional)</label>
-          <input
-            type="text"
-            value={volumeRegistryId}
-            onChange={(e) => setVolumeRegistryId(e.target.value)}
-            placeholder="0x..."
-            className="input font-mono text-sm"
-          />
-          <p className="text-xs text-gray-500 mt-1">
-            Required for capacity-aware operations (deposit/transfer with volume limits)
-          </p>
-        </div>
-
-        <button
-          onClick={handleSave}
-          disabled={!packageId || !verifyingKeysId}
-          className="btn-primary w-full"
-        >
-          {saved ? 'Saved!' : 'Save Configuration'}
-        </button>
+        {!isConfigured && (
+          <div className="alert alert-warning mt-2">
+            <div className="mb-1">HOW TO DEPLOY:</div>
+            <div className="text-small">
+              1. Build: `cd packages/inventory && sui move build`<br/>
+              2. Publish: `sui client publish --gas-budget 100000000`<br/>
+              3. Copy Package ID from output<br/>
+              4. Initialize verifying keys (export VKs from prover)<br/>
+              5. Copy VerifyingKeys object ID
+            </div>
+          </div>
+        )}
       </div>
-
-      {!isConfigured && (
-        <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
-          <h4 className="text-sm font-medium text-amber-800 mb-2">
-            How to Deploy
-          </h4>
-          <ol className="text-xs text-amber-700 space-y-1 list-decimal list-inside">
-            <li>
-              Build the package: <code>cd packages/inventory && sui move build</code>
-            </li>
-            <li>
-              Publish: <code>sui client publish --gas-budget 100000000</code>
-            </li>
-            <li>Copy the Package ID from the output</li>
-            <li>Initialize verifying keys (requires exporting VKs from prover)</li>
-            <li>Copy the VerifyingKeys object ID</li>
-          </ol>
-        </div>
-      )}
     </div>
   );
 }

@@ -29,24 +29,20 @@ export function DepositWithdraw() {
   const { packageId, verifyingKeysId, volumeRegistryId } = useContractAddresses();
   const { mutateAsync: signTransaction } = useSignTransaction();
 
-  // Check if local signer is available
   const useLocalSigner = hasLocalSigner();
   const localAddress = useLocalSigner ? getLocalAddress() : null;
   const effectiveAddress = localAddress || account?.address;
 
-  // Demo mode state
   const { inventory, generateBlinding, setSlots, setBlinding } = useInventory([
     { item_id: 1, quantity: 100 },
     { item_id: 2, quantity: 50 },
   ]);
 
-  // On-chain mode state
   const [mode, setMode] = useState<Mode>('demo');
   const [selectedOnChainInventory, setSelectedOnChainInventory] =
     useState<OnChainInventory | null>(null);
   const [localData, setLocalData] = useState<LocalInventoryData | null>(null);
 
-  // Shared state
   const [operation, setOperation] = useState<Operation>('withdraw');
   const [itemId, setItemId] = useState(1);
   const [amount, setAmount] = useState(30);
@@ -56,7 +52,6 @@ export function DepositWithdraw() {
   const [newInventory, setNewInventory] = useState<typeof inventory.slots | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
 
-  // Get current slots based on mode
   const currentSlots = mode === 'demo' ? inventory.slots : localData?.slots || [];
   const currentBlinding = mode === 'demo' ? inventory.blinding : localData?.blinding;
   const currentMaxCapacity = mode === 'demo' ? 0 : selectedOnChainInventory?.maxCapacity || 0;
@@ -107,14 +102,12 @@ export function DepositWithdraw() {
           amount
         );
 
-        // Calculate new inventory
         updatedSlots = currentSlots
           .map((s) =>
             s.item_id === itemId ? { ...s, quantity: s.quantity - amount } : s
           )
           .filter((s) => s.quantity > 0);
       } else {
-        // Use capacity-aware endpoint if inventory has capacity limit and registry is configured
         if (hasCapacityLimit) {
           result = await api.proveDepositWithCapacity(
             currentSlots,
@@ -135,7 +128,6 @@ export function DepositWithdraw() {
           );
         }
 
-        // Calculate new inventory
         const existingIndex = currentSlots.findIndex((s) => s.item_id === itemId);
         if (existingIndex >= 0) {
           updatedSlots = currentSlots.map((s) =>
@@ -149,7 +141,6 @@ export function DepositWithdraw() {
       setProofResult(result);
       setNewInventory(updatedSlots);
 
-      // If on-chain mode, execute on-chain
       if (mode === 'onchain' && selectedOnChainInventory && effectiveAddress) {
         await executeOnChain(result, newBlinding, updatedSlots);
       }
@@ -208,13 +199,11 @@ export function DepositWithdraw() {
       let txResult;
 
       if (useLocalSigner && localAddress) {
-        // Use local signer - no wallet interaction needed!
         console.log('Using local signer for deposit/withdraw:', localAddress);
         tx.setSender(localAddress);
         const localClient = getLocalnetClient();
         txResult = await signAndExecuteWithLocalSigner(tx, localClient);
       } else if (account) {
-        // Use wallet for signing
         tx.setSender(account.address);
         const signedTx = await signTransaction({
           transaction: tx as unknown as Parameters<typeof signTransaction>[0]['transaction'],
@@ -232,7 +221,6 @@ export function DepositWithdraw() {
       if (effects?.status?.status === 'success') {
         setTxDigest(txResult.digest);
 
-        // Update local storage with new inventory state
         const stored = JSON.parse(localStorage.getItem('inventory-blindings') || '{}');
         stored[selectedOnChainInventory.id] = {
           blinding: newBlinding,
@@ -240,7 +228,6 @@ export function DepositWithdraw() {
         };
         localStorage.setItem('inventory-blindings', JSON.stringify(stored));
 
-        // Update local state
         setLocalData({
           blinding: newBlinding,
           slots: updatedSlots,
@@ -280,16 +267,16 @@ export function DepositWithdraw() {
   };
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-gray-900">Deposit / Withdraw</h1>
-        <p className="text-gray-600 mt-1">
+    <div className="col">
+      <div className="mb-2">
+        <h1>DEPOSIT / WITHDRAW</h1>
+        <p className="text-muted">
           Prove valid state transitions when adding or removing items.
         </p>
       </div>
 
       {/* Mode Toggle */}
-      <div className="flex rounded-lg bg-gray-100 p-1 w-fit">
+      <div className="btn-group mb-2">
         <button
           onClick={() => {
             setMode('demo');
@@ -297,13 +284,9 @@ export function DepositWithdraw() {
             setNewInventory(null);
             setTxDigest(null);
           }}
-          className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-            mode === 'demo'
-              ? 'bg-white shadow text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          className={`btn btn-secondary ${mode === 'demo' ? 'active' : ''}`}
         >
-          Demo Mode
+          [DEMO]
         </button>
         <button
           onClick={() => {
@@ -312,94 +295,91 @@ export function DepositWithdraw() {
             setNewInventory(null);
             setTxDigest(null);
           }}
-          className={`py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-            mode === 'onchain'
-              ? 'bg-white shadow text-gray-900'
-              : 'text-gray-600 hover:text-gray-900'
-          }`}
+          className={`btn btn-secondary ${mode === 'onchain' ? 'active' : ''}`}
         >
-          On-Chain
+          [ON-CHAIN]
         </button>
       </div>
 
-      <div className="grid lg:grid-cols-2 gap-6">
+      <div className="grid grid-2">
         {/* Left: Configuration */}
-        <div className="space-y-4">
+        <div className="col">
           {mode === 'demo' ? (
             <div className="card">
-              <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold text-gray-900">Demo Inventory</h2>
-                <button
-                  onClick={loadSampleInventory}
-                  className="text-sm text-primary-600 hover:text-primary-800"
-                >
-                  Reset Sample
-                </button>
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">DEMO INVENTORY</span>
+                <div className="card-header-right"></div>
               </div>
+              <div className="card-body">
+                <div className="row-between mb-2">
+                  <span className="text-small text-muted">SAMPLE DATA</span>
+                  <button onClick={loadSampleInventory} className="btn btn-secondary btn-small">
+                    [RESET]
+                  </button>
+                </div>
 
-              <InventoryCard
-                title=""
-                slots={inventory.slots}
-                commitment={inventory.commitment}
-                blinding={inventory.blinding}
-                showBlinding={false}
-              />
+                <InventoryCard
+                  title=""
+                  slots={inventory.slots}
+                  commitment={inventory.commitment}
+                  blinding={inventory.blinding}
+                  showBlinding={false}
+                />
 
-              {!inventory.blinding && (
-                <button
-                  onClick={generateBlinding}
-                  className="btn-primary w-full mt-4"
-                >
-                  Generate Blinding Factor
-                </button>
-              )}
+                {!inventory.blinding && (
+                  <button onClick={generateBlinding} className="btn btn-primary mt-2" style={{ width: '100%' }}>
+                    [GENERATE BLINDING]
+                  </button>
+                )}
+              </div>
             </div>
           ) : (
             <div className="card">
-              <h2 className="font-semibold text-gray-900 mb-4">
-                On-Chain Inventory
-              </h2>
-              <OnChainInventorySelector
-                selectedInventory={selectedOnChainInventory}
-                onSelect={handleInventorySelect}
-              />
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">ON-CHAIN INVENTORY</span>
+                <div className="card-header-right"></div>
+              </div>
+              <div className="card-body">
+                <OnChainInventorySelector
+                  selectedInventory={selectedOnChainInventory}
+                  onSelect={handleInventorySelect}
+                />
+              </div>
             </div>
           )}
 
           <div className="card">
-            <h2 className="font-semibold text-gray-900 mb-4">Operation</h2>
-
-            <div className="space-y-4">
-              {/* Operation toggle */}
-              <div className="flex rounded-lg bg-gray-100 p-1">
+            <div className="card-header">
+              <div className="card-header-left"></div>
+              <span className="card-title">OPERATION</span>
+              <div className="card-header-right"></div>
+            </div>
+            <div className="card-body">
+              <div className="btn-group mb-2" style={{ width: '100%' }}>
                 <button
                   onClick={() => setOperation('withdraw')}
-                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                    operation === 'withdraw'
-                      ? 'bg-white shadow text-gray-900'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`btn btn-secondary ${operation === 'withdraw' ? 'active' : ''}`}
+                  style={{ flex: 1 }}
                 >
-                  Withdraw
+                  [WITHDRAW]
                 </button>
                 <button
                   onClick={() => setOperation('deposit')}
-                  className={`flex-1 py-2 px-4 rounded-md text-sm font-medium transition-colors ${
-                    operation === 'deposit'
-                      ? 'bg-white shadow text-gray-900'
-                      : 'text-gray-600 hover:text-gray-900'
-                  }`}
+                  className={`btn btn-secondary ${operation === 'deposit' ? 'active' : ''}`}
+                  style={{ flex: 1 }}
                 >
-                  Deposit
+                  [DEPOSIT]
                 </button>
               </div>
 
-              <div>
-                <label className="label">Item</label>
+              <div className="input-group">
+                <label className="input-label">Item</label>
                 <select
                   value={itemId}
                   onChange={(e) => setItemId(Number(e.target.value))}
-                  className="input"
+                  className="select"
                 >
                   {operation === 'withdraw' ? (
                     currentSlots.length === 0 ? (
@@ -407,8 +387,7 @@ export function DepositWithdraw() {
                     ) : (
                       currentSlots.map((slot) => (
                         <option key={slot.item_id} value={slot.item_id}>
-                          {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`}{' '}
-                          (have {slot.quantity})
+                          {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`} (have {slot.quantity})
                         </option>
                       ))
                     )
@@ -422,8 +401,8 @@ export function DepositWithdraw() {
                 </select>
               </div>
 
-              <div>
-                <label className="label">Amount</label>
+              <div className="input-group">
+                <label className="input-label">Amount</label>
                 <input
                   type="number"
                   value={amount}
@@ -432,26 +411,21 @@ export function DepositWithdraw() {
                   className="input"
                 />
                 {operation === 'withdraw' && selectedItem && (
-                  <p
-                    className={`text-xs mt-1 ${
-                      canWithdraw ? 'text-emerald-600' : 'text-red-600'
-                    }`}
-                  >
+                  <p className={`text-small mt-1 ${canWithdraw ? 'text-success' : 'text-error'}`}>
                     {canWithdraw
-                      ? `Withdrawing ${amount} of ${selectedItem.quantity}`
-                      : `Insufficient balance (have ${selectedItem.quantity})`}
+                      ? `[OK] Withdrawing ${amount} of ${selectedItem.quantity}`
+                      : `[!!] Insufficient (have ${selectedItem.quantity})`}
                   </p>
                 )}
                 {operation === 'deposit' && (
-                  <p className="text-xs mt-1 text-gray-500">
+                  <p className="text-small text-muted mt-1">
                     Volume: {ITEM_VOLUMES[itemId] ?? 0} x {amount} = {(ITEM_VOLUMES[itemId] ?? 0) * amount}
                   </p>
                 )}
               </div>
 
-              {/* Capacity info for on-chain mode */}
               {mode === 'onchain' && selectedOnChainInventory && currentMaxCapacity > 0 && (
-                <div className="space-y-2">
+                <div className="col">
                   <CapacityBar slots={currentSlots} maxCapacity={currentMaxCapacity} />
                   {operation === 'deposit' && (
                     <CapacityPreview
@@ -466,8 +440,8 @@ export function DepositWithdraw() {
               )}
 
               {operation === 'deposit' && !canDepositWithCapacity && (
-                <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
-                  Deposit would exceed inventory capacity!
+                <div className="alert alert-error">
+                  [!!] Deposit would exceed inventory capacity!
                 </div>
               )}
 
@@ -479,120 +453,75 @@ export function DepositWithdraw() {
                   (operation === 'withdraw' && !canWithdraw) ||
                   (operation === 'deposit' && !canDepositWithCapacity)
                 }
-                className={operation === 'withdraw' ? 'btn-danger w-full' : 'btn-success w-full'}
+                className={`btn ${operation === 'withdraw' ? 'btn-danger' : 'btn-success'}`}
+                style={{ width: '100%' }}
               >
                 {loading
-                  ? 'Processing...'
+                  ? 'PROCESSING...'
                   : mode === 'onchain'
-                  ? `${operation === 'withdraw' ? 'Withdraw' : 'Deposit'} On-Chain`
-                  : operation === 'withdraw'
-                  ? `Withdraw ${amount}`
-                  : `Deposit ${amount}`}
+                  ? `[${operation.toUpperCase()} ON-CHAIN]`
+                  : `[${operation.toUpperCase()} ${amount}]`}
               </button>
             </div>
           </div>
         </div>
 
         {/* Right: Results */}
-        <div className="space-y-4">
-          {/* On-chain success */}
+        <div className="col">
           {txDigest && (
-            <div className="card bg-emerald-50 border-emerald-200">
-              <div className="flex items-center gap-2">
-                <svg
-                  className="w-5 h-5 text-emerald-600"
-                  fill="currentColor"
-                  viewBox="0 0 20 20"
-                >
-                  <path
-                    fillRule="evenodd"
-                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                    clipRule="evenodd"
-                  />
-                </svg>
-                <span className="font-semibold text-emerald-800">
-                  On-Chain {operation === 'withdraw' ? 'Withdrawal' : 'Deposit'} Successful
-                </span>
-              </div>
-              <p className="text-sm mt-2 text-gray-600">
-                Transaction executed on Sui blockchain.
-              </p>
-              <code className="block text-xs bg-emerald-100 rounded p-2 mt-2 break-all">
-                {txDigest}
-              </code>
+            <div className="alert alert-success">
+              <div>[OK] ON-CHAIN {operation.toUpperCase()} SUCCESSFUL</div>
+              <div className="text-small mt-1">Transaction executed on Sui blockchain.</div>
+              <code className="text-break text-small">{txDigest}</code>
             </div>
           )}
 
-          {/* State transition preview */}
           {(newInventory || proofResult) && (
             <div className="card">
-              <h3 className="font-semibold text-gray-900 mb-4">
-                State Transition
-              </h3>
-
-              <div className="flex items-center gap-4">
-                <div className="flex-1">
-                  <div className="text-xs text-gray-500 mb-1">Before</div>
-                  <div className="p-2 bg-gray-50 rounded text-sm">
-                    {currentSlots
-                      .map(
-                        (s) =>
-                          `${ITEM_NAMES[s.item_id] || `#${s.item_id}`}: ${s.quantity}`
-                      )
-                      .join(', ') || 'Empty'}
-                  </div>
-                </div>
-
-                <svg
-                  className="w-6 h-6 text-gray-400 flex-shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M13 7l5 5m0 0l-5 5m5-5H6"
-                  />
-                </svg>
-
-                <div className="flex-1">
-                  <div className="text-xs text-gray-500 mb-1">After</div>
-                  <div className="p-2 bg-emerald-50 rounded text-sm">
-                    {newInventory
-                      ?.map(
-                        (s) =>
-                          `${ITEM_NAMES[s.item_id] || `#${s.item_id}`}: ${s.quantity}`
-                      )
-                      .join(', ') || 'Empty'}
-                  </div>
-                </div>
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">STATE TRANSITION</span>
+                <div className="card-header-right"></div>
               </div>
-
-              {proofResult && (
-                <div className="mt-4 pt-4 border-t border-gray-100">
-                  <div className="text-xs text-gray-500 mb-1">
-                    New Commitment
+              <div className="card-body">
+                <div className="row" style={{ alignItems: 'stretch' }}>
+                  <div style={{ flex: 1 }}>
+                    <div className="text-small text-muted mb-1">BEFORE</div>
+                    <div className="badge">
+                      {currentSlots
+                        .map((s) => `${ITEM_NAMES[s.item_id] || `#${s.item_id}`}: ${s.quantity}`)
+                        .join(', ') || 'Empty'}
+                    </div>
                   </div>
-                  <code className="block text-xs bg-gray-100 rounded p-2 break-all">
-                    {proofResult.new_commitment}
-                  </code>
-                </div>
-              )}
 
-              {mode === 'demo' && proofResult && (
-                <button
-                  onClick={applyChanges}
-                  className="btn-primary w-full mt-4"
-                >
-                  Apply Changes & Continue
-                </button>
-              )}
+                  <div className="text-muted" style={{ padding: '0 1ch' }}>-&gt;</div>
+
+                  <div style={{ flex: 1 }}>
+                    <div className="text-small text-muted mb-1">AFTER</div>
+                    <div className="badge badge-success">
+                      {newInventory
+                        ?.map((s) => `${ITEM_NAMES[s.item_id] || `#${s.item_id}`}: ${s.quantity}`)
+                        .join(', ') || 'Empty'}
+                    </div>
+                  </div>
+                </div>
+
+                {proofResult && (
+                  <div className="mt-2">
+                    <div className="text-small text-muted mb-1">NEW COMMITMENT</div>
+                    <code className="text-break text-small">{proofResult.new_commitment}</code>
+                  </div>
+                )}
+
+                {mode === 'demo' && proofResult && (
+                  <button onClick={applyChanges} className="btn btn-primary mt-2" style={{ width: '100%' }}>
+                    [APPLY CHANGES]
+                  </button>
+                )}
+              </div>
             </div>
           )}
 
-          {/* Results */}
           {loading && (
             <ProofLoading
               message={`${mode === 'onchain' ? 'Executing' : 'Generating'} ${operation} ${
@@ -608,102 +537,32 @@ export function DepositWithdraw() {
               result={proofResult}
               title={`${operation === 'withdraw' ? 'Withdrawal' : 'Deposit'} Proof`}
               extra={
-                <div className="text-sm text-emerald-700">
-                  Proved valid {operation} of{' '}
-                  <strong>{amount}</strong>{' '}
-                  <strong>
-                    {ITEM_NAMES[itemId] || `Item #${itemId}`}
-                  </strong>
-                  . Old and new commitments are publicly linked.
+                <div className="text-small text-success">
+                  [OK] Proved valid {operation} of <strong>{amount}</strong>{' '}
+                  <strong>{ITEM_NAMES[itemId] || `Item #${itemId}`}</strong>.
                 </div>
               }
             />
           )}
 
-          {/* Info */}
           {!loading && !proofResult && !error && (
             <div className="card">
-              <h3 className="font-semibold text-gray-900 mb-3">
-                What Gets Proven
-              </h3>
-              <ul className="space-y-2 text-sm text-gray-600">
-                <li className="flex items-start gap-2">
-                  <svg
-                    className="w-4 h-4 text-emerald-500 mt-0.5"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span>Old commitment matches your claimed inventory</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg
-                    className="w-4 h-4 text-emerald-500 mt-0.5"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span>
-                    {operation === 'withdraw'
-                      ? 'Sufficient balance exists for withdrawal'
-                      : 'New item was added correctly'}
-                  </span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg
-                    className="w-4 h-4 text-emerald-500 mt-0.5"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span>New commitment is correctly computed</span>
-                </li>
-                <li className="flex items-start gap-2">
-                  <svg
-                    className="w-4 h-4 text-emerald-500 mt-0.5"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                      clipRule="evenodd"
-                    />
-                  </svg>
-                  <span>No other items were modified</span>
-                </li>
-                {mode === 'onchain' && (
-                  <li className="flex items-start gap-2">
-                    <svg
-                      className="w-4 h-4 text-emerald-500 mt-0.5"
-                      fill="currentColor"
-                      viewBox="0 0 20 20"
-                    >
-                      <path
-                        fillRule="evenodd"
-                        d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
-                        clipRule="evenodd"
-                      />
-                    </svg>
-                    <span>Commitment is updated on-chain via ZK proof verification</span>
-                  </li>
-                )}
-              </ul>
+              <div className="card-header">
+                <div className="card-header-left"></div>
+                <span className="card-title">WHAT GETS PROVEN</span>
+                <div className="card-header-right"></div>
+              </div>
+              <div className="card-body">
+                <div className="col text-small">
+                  <div>[OK] Old commitment matches your claimed inventory</div>
+                  <div>[OK] {operation === 'withdraw' ? 'Sufficient balance exists for withdrawal' : 'New item was added correctly'}</div>
+                  <div>[OK] New commitment is correctly computed</div>
+                  <div>[OK] No other items were modified</div>
+                  {mode === 'onchain' && (
+                    <div>[OK] Commitment is updated on-chain via ZK proof verification</div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
         </div>

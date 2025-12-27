@@ -4,7 +4,6 @@ import { BrowserRouter } from 'react-router-dom'
 import { SuiProvider } from './sui/provider'
 import App from './App'
 import './index.css'
-import '@mysten/dapp-kit/dist/index.css'
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

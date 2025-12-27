@@ -4,6 +4,7 @@ import { SuiClient, getFullnodeUrl } from '@mysten/sui/client';
 import { Transaction } from '@mysten/sui/transactions';
 
 // Load private key from environment variable
+// @ts-expect-error - Vite environment variable
 const PRIVATE_KEY = import.meta.env.VITE_SUI_PRIVATE_KEY as string | undefined;
 
 let localKeypair: Ed25519Keypair | null = null;
@@ -50,7 +51,7 @@ export function getLocalAddress(): string | null {
 export async function signAndExecuteWithLocalSigner(
   tx: Transaction,
   client: SuiClient
-): Promise<{ digest: string; effects: unknown }> {
+): Promise<{ digest: string; effects?: unknown; objectChanges?: unknown }> {
   const keypair = getLocalKeypair();
   if (!keypair) {
     throw new Error('Local signer not available');
