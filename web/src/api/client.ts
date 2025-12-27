@@ -120,3 +120,80 @@ export async function proveTransfer(
   });
   return handleResponse<TransferResult>(response);
 }
+
+// ============ Capacity-Aware Operations ============
+
+export async function proveCapacity(
+  inventory: InventorySlot[],
+  blinding: string,
+  max_capacity: number,
+  volume_registry: number[]
+): Promise<ProofResult> {
+  const response = await fetch(`${API_BASE}/prove/capacity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      inventory,
+      blinding,
+      max_capacity,
+      volume_registry,
+    }),
+  });
+  return handleResponse<ProofResult>(response);
+}
+
+export async function proveDepositWithCapacity(
+  old_inventory: InventorySlot[],
+  old_blinding: string,
+  new_blinding: string,
+  item_id: number,
+  amount: number,
+  max_capacity: number,
+  volume_registry: number[]
+): Promise<DepositResult> {
+  const response = await fetch(`${API_BASE}/prove/deposit-capacity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      old_inventory,
+      old_blinding,
+      new_blinding,
+      item_id,
+      amount,
+      max_capacity,
+      volume_registry,
+    }),
+  });
+  return handleResponse<DepositResult>(response);
+}
+
+export async function proveTransferWithCapacity(
+  src_old_inventory: InventorySlot[],
+  src_old_blinding: string,
+  src_new_blinding: string,
+  dst_old_inventory: InventorySlot[],
+  dst_old_blinding: string,
+  dst_new_blinding: string,
+  item_id: number,
+  amount: number,
+  dst_max_capacity: number,
+  volume_registry: number[]
+): Promise<TransferResult> {
+  const response = await fetch(`${API_BASE}/prove/transfer-capacity`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      src_old_inventory,
+      src_old_blinding,
+      src_new_blinding,
+      dst_old_inventory,
+      dst_old_blinding,
+      dst_new_blinding,
+      item_id,
+      amount,
+      dst_max_capacity,
+      volume_registry,
+    }),
+  });
+  return handleResponse<TransferResult>(response);
+}

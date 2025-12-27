@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { InventoryCard } from '../components/InventoryCard';
-import { ITEM_NAMES, MAX_ITEM_SLOTS } from '../types';
+import { CapacityBar } from '../components/CapacityBar';
+import { ITEM_NAMES, MAX_ITEM_SLOTS, ITEM_VOLUMES, canDeposit } from '../types';
 
 export function CreateInventory() {
   const {
@@ -17,14 +18,20 @@ export function CreateInventory() {
   const [newItemId, setNewItemId] = useState(1);
   const [newQuantity, setNewQuantity] = useState(100);
   const [showAddForm, setShowAddForm] = useState(false);
+  const [maxCapacity, setMaxCapacity] = useState(1000);
 
   const handleAddItem = () => {
     if (inventory.slots.length >= MAX_ITEM_SLOTS) {
       return;
     }
+    if (maxCapacity > 0 && !canDeposit(inventory.slots, newItemId, newQuantity, maxCapacity)) {
+      return; // Would exceed capacity
+    }
     addSlot(newItemId, newQuantity);
     setShowAddForm(false);
   };
+
+  const wouldExceedCapacity = maxCapacity > 0 && !canDeposit(inventory.slots, newItemId, newQuantity, maxCapacity);
 
   const handleGenerateAndCommit = async () => {
     await generateBlinding();
@@ -42,6 +49,30 @@ export function CreateInventory() {
       <div className="grid lg:grid-cols-2 gap-6">
         {/* Left: Inventory builder */}
         <div className="space-y-4">
+          {/* Capacity Configuration */}
+          <div className="card">
+            <h2 className="font-semibold text-gray-900 mb-4">Capacity Settings</h2>
+            <div>
+              <label className="label">Max Capacity (0 = unlimited)</label>
+              <input
+                type="number"
+                value={maxCapacity}
+                onChange={(e) => setMaxCapacity(Number(e.target.value))}
+                min={0}
+                className="input"
+                placeholder="Enter max volume capacity"
+              />
+              <p className="text-xs text-gray-500 mt-1">
+                Each item has a volume. Total volume must not exceed capacity.
+              </p>
+            </div>
+            <CapacityBar
+              slots={inventory.slots}
+              maxCapacity={maxCapacity}
+              className="mt-4"
+            />
+          </div>
+
           <div className="card">
             <h2 className="font-semibold text-gray-900 mb-4">Add Items</h2>
 
@@ -73,8 +104,23 @@ export function CreateInventory() {
                   />
                 </div>
 
+                {/* Volume preview */}
+                <div className="text-sm text-gray-600 bg-gray-50 p-2 rounded">
+                  Volume: {ITEM_VOLUMES[newItemId] ?? 0} x {newQuantity} = {(ITEM_VOLUMES[newItemId] ?? 0) * newQuantity}
+                </div>
+
+                {wouldExceedCapacity && (
+                  <div className="text-sm text-red-600 bg-red-50 p-2 rounded">
+                    Adding this item would exceed capacity!
+                  </div>
+                )}
+
                 <div className="flex gap-2">
-                  <button onClick={handleAddItem} className="btn-primary flex-1">
+                  <button
+                    onClick={handleAddItem}
+                    disabled={wouldExceedCapacity}
+                    className={`flex-1 ${wouldExceedCapacity ? 'btn-secondary opacity-50 cursor-not-allowed' : 'btn-primary'}`}
+                  >
                     Add Item
                   </button>
                   <button
@@ -107,6 +153,9 @@ export function CreateInventory() {
                       <span className="text-sm">
                         {ITEM_NAMES[slot.item_id] || `Item #${slot.item_id}`}:{' '}
                         <strong>{slot.quantity}</strong>
+                        <span className="text-gray-400 ml-2">
+                          ({(ITEM_VOLUMES[slot.item_id] ?? 0) * slot.quantity} vol)
+                        </span>
                       </span>
                       <button
                         onClick={() => removeSlot(i)}

@@ -113,7 +113,7 @@ export function ProveOwnership() {
       // Use dev-inspect to verify without executing (read-only check)
       // No wallet signature needed - dev-inspect simulates the transaction
       const devInspectResult = await client.devInspectTransactionBlock({
-        transactionBlock: tx,
+        transactionBlock: tx as unknown as Parameters<typeof client.devInspectTransactionBlock>[0]['transactionBlock'],
         sender: account.address,
       });
 

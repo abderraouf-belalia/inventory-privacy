@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   useCurrentAccount,
   useSignTransaction,
@@ -6,9 +6,11 @@ import {
 } from '@mysten/dapp-kit';
 import { ContractConfigPanel, useContractAddresses } from '../sui/ContractConfig';
 import { useOwnedInventories, type OnChainInventory } from '../sui/hooks';
-import { buildCreateInventoryTx, hexToBytes } from '../sui/transactions';
+import { buildCreateInventoryWithCapacityTx, hexToBytes } from '../sui/transactions';
 import * as api from '../api/client';
-import { ITEM_NAMES, type InventorySlot } from '../types';
+import { ITEM_NAMES, ITEM_VOLUMES, calculateUsedVolume, type InventorySlot } from '../types';
+import { CapacityBar } from '../components/CapacityBar';
+import { hasLocalSigner, getLocalAddress, signAndExecuteWithLocalSigner, getLocalnetClient } from '../sui/localSigner';
 
 export function OnChain() {
   const account = useCurrentAccount();
@@ -22,12 +24,18 @@ export function OnChain() {
   const [newInventory, setNewInventory] = useState<InventorySlot[]>([
     { item_id: 1, quantity: 100 },
   ]);
+  const [maxCapacity, setMaxCapacity] = useState(1000);
+
+  // Check if local signer is available
+  const useLocalSigner = hasLocalSigner();
+  const localAddress = useLocalSigner ? getLocalAddress() : null;
+  const effectiveAddress = localAddress || account?.address;
 
   const isConfigured = packageId.startsWith('0x') && verifyingKeysId.startsWith('0x');
 
   const handleCreateOnChain = async () => {
-    if (!account) {
-      setError('Please connect your wallet');
+    if (!effectiveAddress) {
+      setError('Please connect your wallet or configure local signer');
       return;
     }
 
@@ -42,24 +50,31 @@ export function OnChain() {
       // Convert commitment to bytes
       const commitmentBytes = hexToBytes(commitment);
 
-      // Build transaction - pass recipient address since we'll use the app's client to execute
-      const tx = buildCreateInventoryTx(packageId, commitmentBytes, account.address);
+      // Build transaction with capacity
+      const tx = buildCreateInventoryWithCapacityTx(packageId, commitmentBytes, BigInt(maxCapacity), effectiveAddress);
 
-      // Set sender for the transaction
-      tx.setSender(account.address);
+      let result;
 
-      // Sign the transaction using the wallet
-      // This bypasses the wallet's RPC simulation by only requesting a signature
-      const signedTx = await signTransaction({
-        transaction: tx as Parameters<typeof signTransaction>[0]['transaction'],
-      });
-
-      // Execute using the app's SuiClient (which uses http://127.0.0.1:9000)
-      const result = await client.executeTransactionBlock({
-        transactionBlock: signedTx.bytes,
-        signature: signedTx.signature,
-        options: { showObjectChanges: true },
-      });
+      if (useLocalSigner && localAddress) {
+        // Use local signer - no wallet interaction needed!
+        console.log('Using local signer for address:', localAddress);
+        tx.setSender(localAddress);
+        const localClient = getLocalnetClient();
+        result = await signAndExecuteWithLocalSigner(tx, localClient);
+      } else if (account) {
+        // Use wallet for signing
+        tx.setSender(account.address);
+        const signedTx = await signTransaction({
+          transaction: tx as unknown as Parameters<typeof signTransaction>[0]['transaction'],
+        });
+        result = await client.executeTransactionBlock({
+          transactionBlock: signedTx.bytes,
+          signature: signedTx.signature,
+          options: { showObjectChanges: true },
+        });
+      } else {
+        throw new Error('No signer available');
+      }
 
       // Refetch inventories
       await refetch();
@@ -67,7 +82,8 @@ export function OnChain() {
       // Store the blinding factor locally (in production, use secure storage)
       const stored = JSON.parse(localStorage.getItem('inventory-blindings') || '{}');
       // Find the created inventory ID from object changes
-      const createdObjects = result.objectChanges?.filter(
+      const objectChanges = (result as { objectChanges?: Array<{ type: string; objectId?: string }> }).objectChanges;
+      const createdObjects = objectChanges?.filter(
         (change) => change.type === 'created'
       ) || [];
       if (createdObjects.length > 0 && 'objectId' in createdObjects[0]) {
@@ -75,11 +91,13 @@ export function OnChain() {
         stored[inventoryId] = {
           blinding,
           slots: newInventory,
+          maxCapacity,
         };
         localStorage.setItem('inventory-blindings', JSON.stringify(stored));
       }
 
       setNewInventory([{ item_id: 1, quantity: 100 }]);
+      setMaxCapacity(1000);
     } catch (err) {
       console.error('Create inventory error:', err);
       setError(err instanceof Error ? err.message : 'Failed to create inventory');
@@ -102,17 +120,34 @@ export function OnChain() {
         <div className="space-y-6">
           <ContractConfigPanel />
 
-          {isConfigured && account && (
+          {isConfigured && (effectiveAddress || account) && (
             <div className="card">
               <h2 className="font-semibold text-gray-900 mb-4">
                 Create On-Chain Inventory
               </h2>
 
               <div className="space-y-4">
+                {/* Capacity Configuration */}
+                <div>
+                  <label className="label">Max Capacity (0 = unlimited)</label>
+                  <input
+                    type="number"
+                    value={maxCapacity}
+                    onChange={(e) => setMaxCapacity(Number(e.target.value))}
+                    min={0}
+                    className="input"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    Total volume limit for this inventory
+                  </p>
+                </div>
+
+                <CapacityBar slots={newInventory} maxCapacity={maxCapacity} />
+
                 <div>
                   <label className="label">Initial Items</label>
                   {newInventory.map((slot, i) => (
-                    <div key={i} className="flex gap-2 mb-2">
+                    <div key={i} className="flex gap-2 mb-2 items-center">
                       <select
                         value={slot.item_id}
                         onChange={(e) => {
@@ -124,7 +159,7 @@ export function OnChain() {
                       >
                         {Object.entries(ITEM_NAMES).map(([id, name]) => (
                           <option key={id} value={id}>
-                            {name}
+                            {name} (vol: {ITEM_VOLUMES[Number(id)] ?? 0})
                           </option>
                         ))}
                       </select>
@@ -139,6 +174,9 @@ export function OnChain() {
                         className="input w-24"
                         min={1}
                       />
+                      <span className="text-xs text-gray-500 w-16">
+                        {(ITEM_VOLUMES[slot.item_id] ?? 0) * slot.quantity} vol
+                      </span>
                       <button
                         onClick={() =>
                           setNewInventory(newInventory.filter((_, j) => j !== i))
@@ -158,14 +196,21 @@ export function OnChain() {
                       ])
                     }
                     className="text-sm text-primary-600 hover:text-primary-800"
+                    disabled={maxCapacity > 0 && calculateUsedVolume(newInventory) >= maxCapacity}
                   >
                     + Add Item
                   </button>
                 </div>
 
+                {maxCapacity > 0 && calculateUsedVolume(newInventory) > maxCapacity && (
+                  <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                    Total volume ({calculateUsedVolume(newInventory)}) exceeds capacity ({maxCapacity})!
+                  </div>
+                )}
+
                 <button
                   onClick={handleCreateOnChain}
-                  disabled={creating || newInventory.length === 0}
+                  disabled={creating || newInventory.length === 0 || (maxCapacity > 0 && calculateUsedVolume(newInventory) > maxCapacity)}
                   className="btn-primary w-full"
                 >
                   {creating ? 'Creating...' : 'Create Inventory on Sui'}
@@ -188,7 +233,13 @@ export function OnChain() {
               Your On-Chain Inventories
             </h2>
 
-            {!account ? (
+            {useLocalSigner && localAddress && (
+              <div className="mb-4 p-2 bg-green-50 border border-green-200 rounded text-sm text-green-700">
+                🔑 Using local signer: {localAddress.slice(0, 8)}...{localAddress.slice(-6)}
+              </div>
+            )}
+
+            {!effectiveAddress ? (
               <div className="text-center py-8 text-gray-500">
                 <svg
                   className="w-12 h-12 mx-auto mb-3 text-gray-300"
@@ -203,7 +254,7 @@ export function OnChain() {
                     d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"
                   />
                 </svg>
-                Connect your wallet to view inventories
+                Connect your wallet or set VITE_SUI_PRIVATE_KEY in .env.local
               </div>
             ) : !isConfigured ? (
               <div className="text-center py-8 text-gray-500">
@@ -288,7 +339,9 @@ function InventoryItem({ inventory }: { inventory: OnChainInventory }) {
             <div className="font-medium text-sm">
               {inventory.id.slice(0, 8)}...{inventory.id.slice(-6)}
             </div>
-            <div className="text-xs text-gray-500">Nonce: {inventory.nonce}</div>
+            <div className="text-xs text-gray-500">
+              Nonce: {inventory.nonce} | Capacity: {inventory.maxCapacity || 'Unlimited'}
+            </div>
           </div>
         </div>
 

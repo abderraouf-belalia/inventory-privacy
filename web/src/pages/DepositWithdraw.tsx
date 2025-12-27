@@ -6,17 +6,19 @@ import {
 } from '@mysten/dapp-kit';
 import { useInventory } from '../hooks/useInventory';
 import { InventoryCard } from '../components/InventoryCard';
+import { CapacityBar, CapacityPreview } from '../components/CapacityBar';
 import { ProofResult, ProofLoading, ProofError } from '../components/ProofResult';
 import {
   OnChainInventorySelector,
   type LocalInventoryData,
 } from '../components/OnChainInventorySelector';
 import { useContractAddresses } from '../sui/ContractConfig';
-import { buildWithdrawTx, buildDepositTx, hexToBytes } from '../sui/transactions';
-import { ITEM_NAMES } from '../types';
+import { buildWithdrawTx, buildDepositTx, buildDepositWithCapacityTx, hexToBytes } from '../sui/transactions';
+import { ITEM_NAMES, ITEM_VOLUMES, getVolumeRegistryArray, canDeposit } from '../types';
 import * as api from '../api/client';
 import type { DepositResult, WithdrawResult } from '../types';
 import type { OnChainInventory } from '../sui/hooks';
+import { hasLocalSigner, getLocalAddress, signAndExecuteWithLocalSigner, getLocalnetClient } from '../sui/localSigner';
 
 type Operation = 'deposit' | 'withdraw';
 type Mode = 'demo' | 'onchain';
@@ -24,8 +26,13 @@ type Mode = 'demo' | 'onchain';
 export function DepositWithdraw() {
   const account = useCurrentAccount();
   const client = useSuiClient();
-  const { packageId, verifyingKeysId } = useContractAddresses();
+  const { packageId, verifyingKeysId, volumeRegistryId } = useContractAddresses();
   const { mutateAsync: signTransaction } = useSignTransaction();
+
+  // Check if local signer is available
+  const useLocalSigner = hasLocalSigner();
+  const localAddress = useLocalSigner ? getLocalAddress() : null;
+  const effectiveAddress = localAddress || account?.address;
 
   // Demo mode state
   const { inventory, generateBlinding, setSlots, setBlinding } = useInventory([
@@ -52,9 +59,12 @@ export function DepositWithdraw() {
   // Get current slots based on mode
   const currentSlots = mode === 'demo' ? inventory.slots : localData?.slots || [];
   const currentBlinding = mode === 'demo' ? inventory.blinding : localData?.blinding;
+  const currentMaxCapacity = mode === 'demo' ? 0 : selectedOnChainInventory?.maxCapacity || 0;
+  const hasCapacityLimit = currentMaxCapacity > 0 && volumeRegistryId?.startsWith('0x');
 
   const selectedItem = currentSlots.find((s) => s.item_id === itemId);
   const canWithdraw = selectedItem && selectedItem.quantity >= amount;
+  const canDepositWithCapacity = !hasCapacityLimit || canDeposit(currentSlots, itemId, amount, currentMaxCapacity);
 
   const handleInventorySelect = (
     inv: OnChainInventory | null,
@@ -104,13 +114,26 @@ export function DepositWithdraw() {
           )
           .filter((s) => s.quantity > 0);
       } else {
-        result = await api.proveDeposit(
-          currentSlots,
-          currentBlinding,
-          newBlinding,
-          itemId,
-          amount
-        );
+        // Use capacity-aware endpoint if inventory has capacity limit and registry is configured
+        if (hasCapacityLimit) {
+          result = await api.proveDepositWithCapacity(
+            currentSlots,
+            currentBlinding,
+            newBlinding,
+            itemId,
+            amount,
+            currentMaxCapacity,
+            getVolumeRegistryArray()
+          );
+        } else {
+          result = await api.proveDeposit(
+            currentSlots,
+            currentBlinding,
+            newBlinding,
+            itemId,
+            amount
+          );
+        }
 
         // Calculate new inventory
         const existingIndex = currentSlots.findIndex((s) => s.item_id === itemId);
@@ -127,7 +150,7 @@ export function DepositWithdraw() {
       setNewInventory(updatedSlots);
 
       // If on-chain mode, execute on-chain
-      if (mode === 'onchain' && selectedOnChainInventory && account) {
+      if (mode === 'onchain' && selectedOnChainInventory && effectiveAddress) {
         await executeOnChain(result, newBlinding, updatedSlots);
       }
     } catch (err) {
@@ -142,47 +165,71 @@ export function DepositWithdraw() {
     newBlinding: string,
     updatedSlots: typeof currentSlots
   ) => {
-    if (!selectedOnChainInventory || !account) return;
+    if (!selectedOnChainInventory || !effectiveAddress) return;
 
     try {
       const proofBytes = hexToBytes(result.proof);
       const newCommitmentBytes = hexToBytes(result.new_commitment);
 
-      const tx =
-        operation === 'withdraw'
-          ? buildWithdrawTx(
-              packageId,
-              selectedOnChainInventory.id,
-              verifyingKeysId,
-              proofBytes,
-              newCommitmentBytes,
-              itemId,
-              BigInt(amount)
-            )
-          : buildDepositTx(
-              packageId,
-              selectedOnChainInventory.id,
-              verifyingKeysId,
-              proofBytes,
-              newCommitmentBytes,
-              itemId,
-              BigInt(amount)
-            );
+      let tx;
+      if (operation === 'withdraw') {
+        tx = buildWithdrawTx(
+          packageId,
+          selectedOnChainInventory.id,
+          verifyingKeysId,
+          proofBytes,
+          newCommitmentBytes,
+          itemId,
+          BigInt(amount)
+        );
+      } else if (hasCapacityLimit) {
+        tx = buildDepositWithCapacityTx(
+          packageId,
+          selectedOnChainInventory.id,
+          volumeRegistryId,
+          verifyingKeysId,
+          proofBytes,
+          newCommitmentBytes,
+          itemId,
+          BigInt(amount)
+        );
+      } else {
+        tx = buildDepositTx(
+          packageId,
+          selectedOnChainInventory.id,
+          verifyingKeysId,
+          proofBytes,
+          newCommitmentBytes,
+          itemId,
+          BigInt(amount)
+        );
+      }
 
-      tx.setSender(account.address);
+      let txResult;
 
-      const signedTx = await signTransaction({
-        transaction: tx as Parameters<typeof signTransaction>[0]['transaction'],
-      });
+      if (useLocalSigner && localAddress) {
+        // Use local signer - no wallet interaction needed!
+        console.log('Using local signer for deposit/withdraw:', localAddress);
+        tx.setSender(localAddress);
+        const localClient = getLocalnetClient();
+        txResult = await signAndExecuteWithLocalSigner(tx, localClient);
+      } else if (account) {
+        // Use wallet for signing
+        tx.setSender(account.address);
+        const signedTx = await signTransaction({
+          transaction: tx as unknown as Parameters<typeof signTransaction>[0]['transaction'],
+        });
+        txResult = await client.executeTransactionBlock({
+          transactionBlock: signedTx.bytes,
+          signature: signedTx.signature,
+          options: { showEffects: true },
+        });
+      } else {
+        throw new Error('No signer available');
+      }
 
-      // Execute using the app's SuiClient
-      const txResult = await client.executeTransactionBlock({
-        transactionBlock: signedTx.bytes,
-        signature: signedTx.signature,
-        options: { showEffects: true },
-      });
-
-      if (txResult.effects?.status?.status === 'success') {
+      const effects = txResult.effects as { status?: { status: string; error?: string } } | undefined;
+      if (effects?.status?.status === 'success') {
         setTxDigest(txResult.digest);
 
         // Update local storage with new inventory state
@@ -199,7 +246,7 @@ export function DepositWithdraw() {
           slots: updatedSlots,
         });
       } else {
-        throw new Error('Transaction failed: ' + txResult.effects?.status?.error);
+        throw new Error('Transaction failed: ' + effects?.status?.error);
       }
     } catch (err) {
       console.error('On-chain execution error:', err);
@@ -395,14 +442,42 @@ export function DepositWithdraw() {
                       : `Insufficient balance (have ${selectedItem.quantity})`}
                   </p>
                 )}
+                {operation === 'deposit' && (
+                  <p className="text-xs mt-1 text-gray-500">
+                    Volume: {ITEM_VOLUMES[itemId] ?? 0} x {amount} = {(ITEM_VOLUMES[itemId] ?? 0) * amount}
+                  </p>
+                )}
               </div>
+
+              {/* Capacity info for on-chain mode */}
+              {mode === 'onchain' && selectedOnChainInventory && currentMaxCapacity > 0 && (
+                <div className="space-y-2">
+                  <CapacityBar slots={currentSlots} maxCapacity={currentMaxCapacity} />
+                  {operation === 'deposit' && (
+                    <CapacityPreview
+                      currentSlots={currentSlots}
+                      maxCapacity={currentMaxCapacity}
+                      itemId={itemId}
+                      amount={amount}
+                      isDeposit={true}
+                    />
+                  )}
+                </div>
+              )}
+
+              {operation === 'deposit' && !canDepositWithCapacity && (
+                <div className="p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                  Deposit would exceed inventory capacity!
+                </div>
+              )}
 
               <button
                 onClick={handleOperation}
                 disabled={
                   loading ||
                   !currentBlinding ||
-                  (operation === 'withdraw' && !canWithdraw)
+                  (operation === 'withdraw' && !canWithdraw) ||
+                  (operation === 'deposit' && !canDepositWithCapacity)
                 }
                 className={operation === 'withdraw' ? 'btn-danger w-full' : 'btn-success w-full'}
               >

@@ -5,16 +5,18 @@ import {
   useSuiClient,
 } from '@mysten/dapp-kit';
 import { InventoryCard } from '../components/InventoryCard';
+import { CapacityBar, CapacityPreview } from '../components/CapacityBar';
 import { ProofResult, ProofLoading, ProofError } from '../components/ProofResult';
 import {
   OnChainInventorySelector,
   type LocalInventoryData,
 } from '../components/OnChainInventorySelector';
 import { useContractAddresses } from '../sui/ContractConfig';
-import { buildTransferTx, hexToBytes } from '../sui/transactions';
-import { ITEM_NAMES, type InventorySlot, type TransferResult } from '../types';
+import { buildTransferTx, buildTransferWithCapacityTx, hexToBytes } from '../sui/transactions';
+import { ITEM_NAMES, ITEM_VOLUMES, getVolumeRegistryArray, canDeposit, type InventorySlot, type TransferResult } from '../types';
 import * as api from '../api/client';
 import type { OnChainInventory } from '../sui/hooks';
+import { hasLocalSigner, getLocalAddress, signAndExecuteWithLocalSigner, getLocalnetClient } from '../sui/localSigner';
 
 interface InventoryState {
   slots: InventorySlot[];
@@ -27,8 +29,13 @@ type Mode = 'demo' | 'onchain';
 export function Transfer() {
   const account = useCurrentAccount();
   const client = useSuiClient();
-  const { packageId, verifyingKeysId } = useContractAddresses();
+  const { packageId, verifyingKeysId, volumeRegistryId } = useContractAddresses();
   const { mutateAsync: signTransaction } = useSignTransaction();
+
+  // Check if local signer is available
+  const useLocalSigner = hasLocalSigner();
+  const localAddress = useLocalSigner ? getLocalAddress() : null;
+  const effectiveAddress = localAddress || account?.address;
 
   // Mode
   const [mode, setMode] = useState<Mode>('demo');
@@ -73,6 +80,11 @@ export function Transfer() {
   const sourceItem = currentSrcSlots.find((s) => s.item_id === itemId);
   const canTransfer = sourceItem && sourceItem.quantity >= amount;
 
+  // Destination capacity tracking
+  const dstMaxCapacity = mode === 'demo' ? 0 : dstOnChain?.maxCapacity || 0;
+  const hasDstCapacityLimit = dstMaxCapacity > 0 && volumeRegistryId?.startsWith('0x');
+  const canTransferWithCapacity = !hasDstCapacityLimit || canDeposit(currentDstSlots, itemId, amount, dstMaxCapacity);
+
   const initializeBlindings = async () => {
     const [srcBlinding, dstBlinding] = await Promise.all([
       api.generateBlinding(),
@@ -114,16 +126,32 @@ export function Transfer() {
         api.generateBlinding(),
       ]);
 
-      const result = await api.proveTransfer(
-        currentSrcSlots,
-        currentSrcBlinding,
-        srcNewBlinding,
-        currentDstSlots,
-        currentDstBlinding,
-        dstNewBlinding,
-        itemId,
-        amount
-      );
+      let result: TransferResult;
+      if (hasDstCapacityLimit) {
+        result = await api.proveTransferWithCapacity(
+          currentSrcSlots,
+          currentSrcBlinding,
+          srcNewBlinding,
+          currentDstSlots,
+          currentDstBlinding,
+          dstNewBlinding,
+          itemId,
+          amount,
+          dstMaxCapacity,
+          getVolumeRegistryArray()
+        );
+      } else {
+        result = await api.proveTransfer(
+          currentSrcSlots,
+          currentSrcBlinding,
+          srcNewBlinding,
+          currentDstSlots,
+          currentDstBlinding,
+          dstNewBlinding,
+          itemId,
+          amount
+        );
+      }
 
       setProofResult(result);
 
@@ -158,7 +186,7 @@ export function Transfer() {
         });
 
         setTransferComplete(true);
-      } else if (srcOnChain && dstOnChain && account) {
+      } else if (srcOnChain && dstOnChain && effectiveAddress) {
         await executeOnChain(
           result,
           srcNewBlinding,
@@ -181,38 +209,66 @@ export function Transfer() {
     newSourceSlots: InventorySlot[],
     newDstSlots: InventorySlot[]
   ) => {
-    if (!srcOnChain || !dstOnChain || !account) return;
+    if (!srcOnChain || !dstOnChain || !effectiveAddress) return;
 
     try {
       const proofBytes = hexToBytes(result.proof);
       const srcNewCommitmentBytes = hexToBytes(result.src_new_commitment);
       const dstNewCommitmentBytes = hexToBytes(result.dst_new_commitment);
 
-      const tx = buildTransferTx(
-        packageId,
-        srcOnChain.id,
-        dstOnChain.id,
-        verifyingKeysId,
-        proofBytes,
-        srcNewCommitmentBytes,
-        dstNewCommitmentBytes,
-        itemId,
-        BigInt(amount)
-      );
+      let tx;
+      if (hasDstCapacityLimit) {
+        tx = buildTransferWithCapacityTx(
+          packageId,
+          srcOnChain.id,
+          dstOnChain.id,
+          volumeRegistryId,
+          verifyingKeysId,
+          proofBytes,
+          srcNewCommitmentBytes,
+          dstNewCommitmentBytes,
+          itemId,
+          BigInt(amount)
+        );
+      } else {
+        tx = buildTransferTx(
+          packageId,
+          srcOnChain.id,
+          dstOnChain.id,
+          verifyingKeysId,
+          proofBytes,
+          srcNewCommitmentBytes,
+          dstNewCommitmentBytes,
+          itemId,
+          BigInt(amount)
+        );
+      }
 
-      tx.setSender(account.address);
+      let txResult;
 
-      const signedTx = await signTransaction({
-        transaction: tx as Parameters<typeof signTransaction>[0]['transaction'],
-      });
+      if (useLocalSigner && localAddress) {
+        // Use local signer - no wallet interaction needed!
+        console.log('Using local signer for transfer:', localAddress);
+        tx.setSender(localAddress);
+        const localClient = getLocalnetClient();
+        txResult = await signAndExecuteWithLocalSigner(tx, localClient);
+      } else if (account) {
+        // Use wallet for signing
+        tx.setSender(account.address);
+        const signedTx = await signTransaction({
+          transaction: tx as unknown as Parameters<typeof signTransaction>[0]['transaction'],
+        });
+        txResult = await client.executeTransactionBlock({
+          transactionBlock: signedTx.bytes,
+          signature: signedTx.signature,
+          options: { showEffects: true },
+        });
+      } else {
+        throw new Error('No signer available');
+      }
 
-      const txResult = await client.executeTransactionBlock({
-        transactionBlock: signedTx.bytes,
-        signature: signedTx.signature,
-        options: { showEffects: true },
-      });
-
-      if (txResult.effects?.status?.status === 'success') {
+      const effects = txResult.effects as { status?: { status: string; error?: string } } | undefined;
+      if (effects?.status?.status === 'success') {
         setTxDigest(txResult.digest);
         setTransferComplete(true);
 
@@ -238,7 +294,7 @@ export function Transfer() {
           slots: newDstSlots,
         });
       } else {
-        throw new Error('Transaction failed: ' + txResult.effects?.status?.error);
+        throw new Error('Transaction failed: ' + effects?.status?.error);
       }
     } catch (err) {
       console.error('On-chain transfer error:', err);
@@ -440,6 +496,11 @@ export function Transfer() {
                 max={sourceItem?.quantity || 1}
                 className="input"
               />
+              {hasDstCapacityLimit && (
+                <p className="text-xs mt-1 text-gray-500">
+                  Volume: {ITEM_VOLUMES[itemId] ?? 0} × {amount} = {(ITEM_VOLUMES[itemId] ?? 0) * amount}
+                </p>
+              )}
             </div>
 
             <button
@@ -447,6 +508,7 @@ export function Transfer() {
               disabled={
                 loading ||
                 !canTransfer ||
+                !canTransferWithCapacity ||
                 (mode === 'onchain' && srcOnChain?.id === dstOnChain?.id)
               }
               className="btn-primary"
@@ -479,6 +541,27 @@ export function Transfer() {
           <p className="text-sm text-red-600 mt-2">
             Insufficient balance: only have {sourceItem.quantity}
           </p>
+        )}
+
+        {!canTransferWithCapacity && initialized && canTransfer && (
+          <div className="mt-2 p-2 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+            Transfer would exceed destination inventory capacity!
+          </div>
+        )}
+
+        {/* Destination capacity info for on-chain mode */}
+        {mode === 'onchain' && dstOnChain && dstMaxCapacity > 0 && (
+          <div className="mt-4 space-y-2">
+            <div className="text-xs text-gray-500 font-medium">Destination Capacity</div>
+            <CapacityBar slots={currentDstSlots} maxCapacity={dstMaxCapacity} />
+            <CapacityPreview
+              currentSlots={currentDstSlots}
+              maxCapacity={dstMaxCapacity}
+              itemId={itemId}
+              amount={amount}
+              isDeposit={true}
+            />
+          </div>
         )}
       </div>
 
@@ -610,6 +693,11 @@ export function Transfer() {
           {mode === 'onchain' && (
             <div className="mt-4 pt-4 border-t border-gray-200 text-sm text-gray-600">
               Both inventories&apos; commitments will be updated on-chain after ZK proof verification.
+              {hasDstCapacityLimit && (
+                <span className="block mt-1 text-primary-600">
+                  Capacity-aware proof will verify destination doesn&apos;t exceed its volume limit.
+                </span>
+              )}
             </div>
           )}
         </div>

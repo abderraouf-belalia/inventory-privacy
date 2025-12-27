@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useSuiClientContext } from '@mysten/dapp-kit';
+import { useNetworkVariables } from './config';
 
 // Store contract addresses in localStorage per network
 const STORAGE_KEY = 'inventory-privacy-contracts';
@@ -7,6 +8,7 @@ const STORAGE_KEY = 'inventory-privacy-contracts';
 interface ContractAddresses {
   packageId: string;
   verifyingKeysId: string;
+  volumeRegistryId: string;
 }
 
 type NetworkAddresses = Record<string, ContractAddresses>;
@@ -26,6 +28,7 @@ function saveAddresses(addresses: NetworkAddresses) {
 
 export function useContractAddresses(): ContractAddresses {
   const { network } = useSuiClientContext();
+  const configVars = useNetworkVariables();
   const [addresses, setAddresses] = useState<NetworkAddresses>(loadAddresses);
 
   useEffect(() => {
@@ -34,26 +37,41 @@ export function useContractAddresses(): ContractAddresses {
     return () => window.removeEventListener('storage', handleStorage);
   }, []);
 
-  return addresses[network] || { packageId: '', verifyingKeysId: '' };
+  // Use localStorage values if set, otherwise fall back to config defaults
+  const stored = addresses[network] || { packageId: '', verifyingKeysId: '', volumeRegistryId: '' };
+
+  return {
+    packageId: stored.packageId || configVars.packageId || '',
+    verifyingKeysId: stored.verifyingKeysId || configVars.verifyingKeysId || '',
+    volumeRegistryId: stored.volumeRegistryId || configVars.volumeRegistryId || '',
+  };
 }
 
 export function ContractConfigPanel() {
   const { network } = useSuiClientContext();
+  const configVars = useNetworkVariables();
   const [addresses, setAddresses] = useState<NetworkAddresses>(loadAddresses);
   const [packageId, setPackageId] = useState('');
   const [verifyingKeysId, setVerifyingKeysId] = useState('');
+  const [volumeRegistryId, setVolumeRegistryId] = useState('');
   const [saved, setSaved] = useState(false);
 
+  // Only update form when network changes, not on every render
   useEffect(() => {
-    const current = addresses[network] || { packageId: '', verifyingKeysId: '' };
-    setPackageId(current.packageId);
-    setVerifyingKeysId(current.verifyingKeysId);
-  }, [network, addresses]);
+    const storedAddresses = loadAddresses();
+    const stored = storedAddresses[network] || { packageId: '', verifyingKeysId: '', volumeRegistryId: '' };
+    // Show stored values or config defaults
+    setPackageId(stored.packageId || configVars.packageId || '');
+    setVerifyingKeysId(stored.verifyingKeysId || configVars.verifyingKeysId || '');
+    setVolumeRegistryId(stored.volumeRegistryId || configVars.volumeRegistryId || '');
+    setAddresses(storedAddresses);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [network]);
 
   const handleSave = () => {
     const newAddresses = {
       ...addresses,
-      [network]: { packageId, verifyingKeysId },
+      [network]: { packageId, verifyingKeysId, volumeRegistryId },
     };
     setAddresses(newAddresses);
     saveAddresses(newAddresses);
@@ -111,6 +129,20 @@ export function ContractConfigPanel() {
           />
           <p className="text-xs text-gray-500 mt-1">
             The VerifyingKeys shared object created during initialization
+          </p>
+        </div>
+
+        <div>
+          <label className="label">Volume Registry Object ID (optional)</label>
+          <input
+            type="text"
+            value={volumeRegistryId}
+            onChange={(e) => setVolumeRegistryId(e.target.value)}
+            placeholder="0x..."
+            className="input font-mono text-sm"
+          />
+          <p className="text-xs text-gray-500 mt-1">
+            Required for capacity-aware operations (deposit/transfer with volume limits)
           </p>
         </div>
 

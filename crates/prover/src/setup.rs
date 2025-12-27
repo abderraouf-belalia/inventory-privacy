@@ -10,8 +10,9 @@ use ark_std::rand::{rngs::StdRng, SeedableRng};
 use thiserror::Error;
 
 use inventory_circuits::{
-    commitment::poseidon_config, DepositCircuit, ItemExistsCircuit, TransferCircuit,
-    WithdrawCircuit,
+    commitment::poseidon_config, CapacityProofCircuit, DepositCircuit,
+    DepositWithCapacityCircuit, ItemExistsCircuit, TransferCircuit,
+    TransferWithCapacityCircuit, WithdrawCircuit,
 };
 
 /// Errors that can occur during setup
@@ -72,6 +73,10 @@ pub struct CircuitKeys {
     pub withdraw: CircuitKeyPair,
     pub deposit: CircuitKeyPair,
     pub transfer: CircuitKeyPair,
+    // Capacity-aware circuits
+    pub capacity: CircuitKeyPair,
+    pub deposit_capacity: CircuitKeyPair,
+    pub transfer_capacity: CircuitKeyPair,
 }
 
 impl CircuitKeys {
@@ -90,6 +95,16 @@ impl CircuitKeys {
 
         std::fs::write(dir.join("transfer.pk"), self.transfer.serialize_pk()?)?;
         std::fs::write(dir.join("transfer.vk"), self.transfer.serialize_vk()?)?;
+
+        // Capacity-aware circuits
+        std::fs::write(dir.join("capacity.pk"), self.capacity.serialize_pk()?)?;
+        std::fs::write(dir.join("capacity.vk"), self.capacity.serialize_vk()?)?;
+
+        std::fs::write(dir.join("deposit_capacity.pk"), self.deposit_capacity.serialize_pk()?)?;
+        std::fs::write(dir.join("deposit_capacity.vk"), self.deposit_capacity.serialize_vk()?)?;
+
+        std::fs::write(dir.join("transfer_capacity.pk"), self.transfer_capacity.serialize_pk()?)?;
+        std::fs::write(dir.join("transfer_capacity.vk"), self.transfer_capacity.serialize_vk()?)?;
 
         Ok(())
     }
@@ -124,11 +139,30 @@ impl CircuitKeys {
             )?)?,
         };
 
+        // Capacity-aware circuits
+        let capacity = CircuitKeyPair {
+            proving_key: CircuitKeyPair::deserialize_pk(&std::fs::read(dir.join("capacity.pk"))?)?,
+            verifying_key: CircuitKeyPair::deserialize_vk(&std::fs::read(dir.join("capacity.vk"))?)?,
+        };
+
+        let deposit_capacity = CircuitKeyPair {
+            proving_key: CircuitKeyPair::deserialize_pk(&std::fs::read(dir.join("deposit_capacity.pk"))?)?,
+            verifying_key: CircuitKeyPair::deserialize_vk(&std::fs::read(dir.join("deposit_capacity.vk"))?)?,
+        };
+
+        let transfer_capacity = CircuitKeyPair {
+            proving_key: CircuitKeyPair::deserialize_pk(&std::fs::read(dir.join("transfer_capacity.pk"))?)?,
+            verifying_key: CircuitKeyPair::deserialize_vk(&std::fs::read(dir.join("transfer_capacity.vk"))?)?,
+        };
+
         Ok(Self {
             item_exists,
             withdraw,
             deposit,
             transfer,
+            capacity,
+            deposit_capacity,
+            transfer_capacity,
         })
     }
 }
@@ -149,13 +183,25 @@ pub fn setup_all_circuits() -> Result<CircuitKeys, SetupError> {
     let deposit = setup_deposit(&mut rng, config.clone())?;
 
     println!("Setting up TransferCircuit...");
-    let transfer = setup_transfer(&mut rng, config)?;
+    let transfer = setup_transfer(&mut rng, config.clone())?;
+
+    println!("Setting up CapacityProofCircuit...");
+    let capacity = setup_capacity(&mut rng, config.clone())?;
+
+    println!("Setting up DepositWithCapacityCircuit...");
+    let deposit_capacity = setup_deposit_capacity(&mut rng, config.clone())?;
+
+    println!("Setting up TransferWithCapacityCircuit...");
+    let transfer_capacity = setup_transfer_capacity(&mut rng, config)?;
 
     Ok(CircuitKeys {
         item_exists,
         withdraw,
         deposit,
         transfer,
+        capacity,
+        deposit_capacity,
+        transfer_capacity,
     })
 }
 
@@ -210,6 +256,51 @@ pub fn setup_transfer(
     config: Arc<ark_crypto_primitives::sponge::poseidon::PoseidonConfig<Fr>>,
 ) -> Result<CircuitKeyPair, SetupError> {
     let circuit = TransferCircuit::empty(config);
+    let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circuit, rng)
+        .map_err(|e| SetupError::CircuitSetup(e.to_string()))?;
+
+    Ok(CircuitKeyPair {
+        proving_key: pk,
+        verifying_key: vk,
+    })
+}
+
+/// Setup CapacityProofCircuit
+pub fn setup_capacity(
+    rng: &mut StdRng,
+    config: Arc<ark_crypto_primitives::sponge::poseidon::PoseidonConfig<Fr>>,
+) -> Result<CircuitKeyPair, SetupError> {
+    let circuit = CapacityProofCircuit::empty(config);
+    let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circuit, rng)
+        .map_err(|e| SetupError::CircuitSetup(e.to_string()))?;
+
+    Ok(CircuitKeyPair {
+        proving_key: pk,
+        verifying_key: vk,
+    })
+}
+
+/// Setup DepositWithCapacityCircuit
+pub fn setup_deposit_capacity(
+    rng: &mut StdRng,
+    config: Arc<ark_crypto_primitives::sponge::poseidon::PoseidonConfig<Fr>>,
+) -> Result<CircuitKeyPair, SetupError> {
+    let circuit = DepositWithCapacityCircuit::empty(config);
+    let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circuit, rng)
+        .map_err(|e| SetupError::CircuitSetup(e.to_string()))?;
+
+    Ok(CircuitKeyPair {
+        proving_key: pk,
+        verifying_key: vk,
+    })
+}
+
+/// Setup TransferWithCapacityCircuit
+pub fn setup_transfer_capacity(
+    rng: &mut StdRng,
+    config: Arc<ark_crypto_primitives::sponge::poseidon::PoseidonConfig<Fr>>,
+) -> Result<CircuitKeyPair, SetupError> {
+    let circuit = TransferWithCapacityCircuit::empty(config);
     let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(circuit, rng)
         .map_err(|e| SetupError::CircuitSetup(e.to_string()))?;
 

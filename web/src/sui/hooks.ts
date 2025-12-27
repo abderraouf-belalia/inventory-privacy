@@ -1,5 +1,6 @@
 import { useSuiClient, useCurrentAccount } from '@mysten/dapp-kit';
 import { useQuery } from '@tanstack/react-query';
+import { hasLocalSigner, getLocalAddress, getLocalnetClient } from './localSigner';
 
 // Type for on-chain PrivateInventory object
 export interface OnChainInventory {
@@ -7,24 +8,32 @@ export interface OnChainInventory {
   commitment: string;
   owner: string;
   nonce: number;
+  maxCapacity: number;
 }
 
 /**
- * Fetch all PrivateInventory objects owned by the current account
+ * Fetch all PrivateInventory objects owned by the current account or local signer
  */
 export function useOwnedInventories(packageId: string) {
-  const client = useSuiClient();
+  const dappKitClient = useSuiClient();
   const account = useCurrentAccount();
 
+  // Use local signer address if available, otherwise use connected wallet
+  const localAddress = hasLocalSigner() ? getLocalAddress() : null;
+  const effectiveAddress = localAddress || account?.address;
+
+  // Use localnet client for local signer
+  const client = localAddress ? getLocalnetClient() : dappKitClient;
+
   return useQuery({
-    queryKey: ['owned-inventories', account?.address, packageId],
+    queryKey: ['owned-inventories', effectiveAddress, packageId],
     queryFn: async (): Promise<OnChainInventory[]> => {
-      if (!account?.address || !packageId) {
+      if (!effectiveAddress || !packageId) {
         return [];
       }
 
       const objects = await client.getOwnedObjects({
-        owner: account.address,
+        owner: effectiveAddress,
         filter: {
           StructType: `${packageId}::inventory::PrivateInventory`,
         },
@@ -46,11 +55,12 @@ export function useOwnedInventories(packageId: string) {
             commitment: bytesToHex(fields.commitment as number[]),
             owner: fields.owner as string,
             nonce: Number(fields.nonce),
+            maxCapacity: Number(fields.max_capacity || 0),
           };
         })
         .filter((inv): inv is OnChainInventory => inv !== null);
     },
-    enabled: !!account?.address && !!packageId && packageId.startsWith('0x'),
+    enabled: !!effectiveAddress && !!packageId && packageId.startsWith('0x'),
     refetchInterval: 5000, // Refetch every 5 seconds
   });
 }
@@ -86,6 +96,7 @@ export function useInventory(inventoryId: string) {
         commitment: bytesToHex(fields.commitment as number[]),
         owner: fields.owner as string,
         nonce: Number(fields.nonce),
+        maxCapacity: Number(fields.max_capacity || 0),
       };
     },
     enabled: !!inventoryId && inventoryId.startsWith('0x'),

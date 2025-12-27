@@ -11,7 +11,9 @@ use thiserror::Error;
 
 use inventory_circuits::{
     commitment::{create_inventory_commitment, poseidon_config},
-    DepositCircuit, Inventory, ItemExistsCircuit, TransferCircuit, WithdrawCircuit,
+    compute_registry_hash, CapacityProofCircuit, DepositCircuit, DepositWithCapacityCircuit,
+    Inventory, ItemExistsCircuit, TransferCircuit, TransferWithCapacityCircuit, VolumeRegistry,
+    WithdrawCircuit,
 };
 
 /// Errors during proof generation
@@ -273,6 +275,231 @@ pub fn prove_transfer(
         dst_new_commitment,
         Fr::from(item_id as u64),
         Fr::from(amount),
+    ];
+
+    Ok((
+        ProofWithInputs {
+            proof,
+            public_inputs,
+        },
+        src_new_inventory,
+        src_new_commitment,
+        dst_new_inventory,
+        dst_new_commitment,
+    ))
+}
+
+// ============================================================================
+// Capacity-aware proof functions
+// ============================================================================
+
+/// Generate proof for CapacityProofCircuit
+pub fn prove_capacity(
+    pk: &ProvingKey<Bn254>,
+    inventory: &Inventory,
+    blinding: Fr,
+    max_capacity: u64,
+    volume_registry: &VolumeRegistry,
+) -> Result<ProofWithInputs, ProveError> {
+    let config = Arc::new(poseidon_config::<Fr>());
+    let commitment = create_inventory_commitment(inventory, blinding, &config);
+    let registry_hash = compute_registry_hash(volume_registry, &config);
+
+    // Verify capacity is not exceeded
+    let used_volume = volume_registry.calculate_used_volume(inventory);
+    if used_volume > max_capacity {
+        return Err(ProveError::InvalidState(format!(
+            "Capacity exceeded: using {}, max {}",
+            used_volume, max_capacity
+        )));
+    }
+
+    let circuit = CapacityProofCircuit::new(
+        inventory.clone(),
+        blinding,
+        commitment,
+        max_capacity,
+        registry_hash,
+        volume_registry.clone(),
+        config,
+    );
+
+    let mut rng = StdRng::from_entropy();
+    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
+        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
+
+    // Public inputs: commitment, max_capacity, registry_hash
+    // Note: volume_registry is now a private witness (not public input)
+    // to stay within Sui's 8 public input limit
+    let public_inputs = vec![commitment, Fr::from(max_capacity), registry_hash];
+
+    Ok(ProofWithInputs {
+        proof,
+        public_inputs,
+    })
+}
+
+/// Generate proof for DepositWithCapacityCircuit
+#[allow(clippy::too_many_arguments)]
+pub fn prove_deposit_with_capacity(
+    pk: &ProvingKey<Bn254>,
+    old_inventory: &Inventory,
+    old_blinding: Fr,
+    new_blinding: Fr,
+    item_id: u32,
+    amount: u64,
+    max_capacity: u64,
+    volume_registry: &VolumeRegistry,
+) -> Result<(ProofWithInputs, Inventory, Fr), ProveError> {
+    let config = Arc::new(poseidon_config::<Fr>());
+    let old_commitment = create_inventory_commitment(old_inventory, old_blinding, &config);
+    let registry_hash = compute_registry_hash(volume_registry, &config);
+
+    // Create new inventory state
+    let mut new_inventory = old_inventory.clone();
+    new_inventory
+        .deposit(item_id, amount)
+        .map_err(|e| ProveError::InvalidState(e.to_string()))?;
+
+    // Verify capacity won't be exceeded
+    let new_used_volume = volume_registry.calculate_used_volume(&new_inventory);
+    if new_used_volume > max_capacity {
+        return Err(ProveError::InvalidState(format!(
+            "Capacity would be exceeded: {} > {}",
+            new_used_volume, max_capacity
+        )));
+    }
+
+    let new_commitment = create_inventory_commitment(&new_inventory, new_blinding, &config);
+
+    let circuit = DepositWithCapacityCircuit::new(
+        old_inventory.clone(),
+        new_inventory.clone(),
+        old_blinding,
+        new_blinding,
+        old_commitment,
+        new_commitment,
+        item_id,
+        amount,
+        max_capacity,
+        registry_hash,
+        volume_registry.clone(),
+        config,
+    );
+
+    let mut rng = StdRng::from_entropy();
+    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
+        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
+
+    // Public inputs: old_commitment, new_commitment, item_id, amount, max_capacity, registry_hash
+    // Note: volume_registry is now a private witness (not public input)
+    // to stay within Sui's 8 public input limit
+    let public_inputs = vec![
+        old_commitment,
+        new_commitment,
+        Fr::from(item_id as u64),
+        Fr::from(amount),
+        Fr::from(max_capacity),
+        registry_hash,
+    ];
+
+    Ok((
+        ProofWithInputs {
+            proof,
+            public_inputs,
+        },
+        new_inventory,
+        new_commitment,
+    ))
+}
+
+/// Generate proof for TransferWithCapacityCircuit
+#[allow(clippy::too_many_arguments)]
+pub fn prove_transfer_with_capacity(
+    pk: &ProvingKey<Bn254>,
+    src_old_inventory: &Inventory,
+    src_old_blinding: Fr,
+    src_new_blinding: Fr,
+    dst_old_inventory: &Inventory,
+    dst_old_blinding: Fr,
+    dst_new_blinding: Fr,
+    item_id: u32,
+    amount: u64,
+    dst_max_capacity: u64,
+    volume_registry: &VolumeRegistry,
+) -> Result<(ProofWithInputs, Inventory, Fr, Inventory, Fr), ProveError> {
+    let config = Arc::new(poseidon_config::<Fr>());
+    let registry_hash = compute_registry_hash(volume_registry, &config);
+
+    // Compute old commitments
+    let src_old_commitment =
+        create_inventory_commitment(src_old_inventory, src_old_blinding, &config);
+    let dst_old_commitment =
+        create_inventory_commitment(dst_old_inventory, dst_old_blinding, &config);
+
+    // Create new inventory states
+    let mut src_new_inventory = src_old_inventory.clone();
+    src_new_inventory
+        .withdraw(item_id, amount)
+        .map_err(|e| ProveError::InvalidState(format!("Source: {}", e)))?;
+
+    let mut dst_new_inventory = dst_old_inventory.clone();
+    dst_new_inventory
+        .deposit(item_id, amount)
+        .map_err(|e| ProveError::InvalidState(format!("Destination: {}", e)))?;
+
+    // Verify destination capacity won't be exceeded
+    let dst_new_volume = volume_registry.calculate_used_volume(&dst_new_inventory);
+    if dst_new_volume > dst_max_capacity {
+        return Err(ProveError::InvalidState(format!(
+            "Destination capacity would be exceeded: {} > {}",
+            dst_new_volume, dst_max_capacity
+        )));
+    }
+
+    // Compute new commitments
+    let src_new_commitment =
+        create_inventory_commitment(&src_new_inventory, src_new_blinding, &config);
+    let dst_new_commitment =
+        create_inventory_commitment(&dst_new_inventory, dst_new_blinding, &config);
+
+    let circuit = TransferWithCapacityCircuit::new(
+        src_old_inventory.clone(),
+        src_new_inventory.clone(),
+        src_old_blinding,
+        src_new_blinding,
+        dst_old_inventory.clone(),
+        dst_new_inventory.clone(),
+        dst_old_blinding,
+        dst_new_blinding,
+        src_old_commitment,
+        src_new_commitment,
+        dst_old_commitment,
+        dst_new_commitment,
+        item_id,
+        amount,
+        dst_max_capacity,
+        registry_hash,
+        volume_registry.clone(),
+        config,
+    );
+
+    let mut rng = StdRng::from_entropy();
+    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
+        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
+
+    // Public inputs: 4 commitments + item_id + amount + dst_max_capacity + registry_hash = 8 inputs
+    // Note: volume_registry is now a private witness (not public input)
+    // to stay exactly at Sui's 8 public input limit
+    let public_inputs = vec![
+        src_old_commitment,
+        src_new_commitment,
+        dst_old_commitment,
+        dst_new_commitment,
+        Fr::from(item_id as u64),
+        Fr::from(amount),
+        Fr::from(dst_max_capacity),
+        registry_hash,
     ];
 
     Ok((

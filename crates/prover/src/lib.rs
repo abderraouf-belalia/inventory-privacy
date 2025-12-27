@@ -10,7 +10,8 @@ pub mod setup;
 pub mod verify;
 
 pub use prove::{
-    prove_deposit, prove_item_exists, prove_transfer, prove_withdraw, ProofWithInputs,
+    prove_capacity, prove_deposit, prove_deposit_with_capacity, prove_item_exists, prove_transfer,
+    prove_transfer_with_capacity, prove_withdraw, ProofWithInputs,
 };
 pub use setup::{setup_all_circuits, CircuitKeys, SetupError};
 pub use verify::{verify_deposit, verify_item_exists, verify_transfer, verify_withdraw};
