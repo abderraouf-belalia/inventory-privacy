@@ -1,6 +1,10 @@
 # Build outputs
 /target/
 /keys/
+crates/*/keys/
+
+# Web build
+web/dist/
 
 # IDE
 .idea/
@@ -18,4 +22,21 @@ packages/*/build/
 # Logs
 *.log
 
+# Node
 **/node_modules/
+
+# Environment
+.env
+.env.local
+web/.env.local
+
+# Claude
+.claude/
+
+# Test artifacts
+.playwright-mcp/
+
+# Generated files
+scripts/*.hex
+scripts/vks-vectors.txt
+nul
