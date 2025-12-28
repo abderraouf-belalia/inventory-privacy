@@ -10,6 +10,7 @@ const navItems = [
   { path: '/operations', label: 'DEPOSIT/WITHDRAW' },
   { path: '/transfer', label: 'TRANSFER' },
   { path: '/on-chain', label: 'ON-CHAIN' },
+  { path: '/explorer', label: 'EXPLORER' },
 ];
 
 function getTheme(): 'light' | 'dark' {

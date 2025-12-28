@@ -6,6 +6,7 @@ import { ProveOwnership } from './pages/ProveOwnership';
 import { DepositWithdraw } from './pages/DepositWithdraw';
 import { Transfer } from './pages/Transfer';
 import { OnChain } from './pages/OnChain';
+import { Explorer } from './pages/Explorer';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="/operations" element={<DepositWithdraw />} />
         <Route path="/transfer" element={<Transfer />} />
         <Route path="/on-chain" element={<OnChain />} />
+        <Route path="/explorer" element={<Explorer />} />
       </Routes>
     </Layout>
   );
