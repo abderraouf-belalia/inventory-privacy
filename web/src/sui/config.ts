@@ -24,9 +24,9 @@ const { networkConfig, useNetworkVariable, useNetworkVariables } =
     localnet: {
       url: 'http://127.0.0.1:9000',
       variables: {
-        packageId: '0xa24d2ddd5bd492d6e9348770e919fa636c8c2fd9b0186b306f53c76a28e61e7b',
-        verifyingKeysId: '0x5d86082720db0bd8e8d738ec1ec191669957dbb4896c5e59472bbce6cf2f863d',
-        volumeRegistryId: '0xd8a00282b9fbfc2250d649e6544a3f1465cc2d75200e13a122dc23da643692de',
+        packageId: '0x5d879e929226c4acb289a2c7feff5860b6ea065f557e351290fd335e0574c70a',
+        verifyingKeysId: '0xa567f8548f05f39a9558438c58078082eb4023710a7728adc469dbcb7f4a09e4',
+        volumeRegistryId: '0x0bd08c2fa6946520c6adf610e501251232fdd54864ba516a553bcc344f6daa3b',
       },
     },
   });
@@ -40,3 +40,5 @@ export const INVENTORY_MODULE = 'inventory';
 export function isContractDeployed(packageId: string): boolean {
   return packageId !== '' && packageId.startsWith('0x');
 }
+
+

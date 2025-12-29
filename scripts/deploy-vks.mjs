@@ -9,7 +9,13 @@ import { fileURLToPath } from 'url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-const PACKAGE_ID = '0xa24d2ddd5bd492d6e9348770e919fa636c8c2fd9b0186b306f53c76a28e61e7b';
+// Get package ID from CLI argument
+const PACKAGE_ID = process.argv[2];
+if (!PACKAGE_ID || !PACKAGE_ID.startsWith('0x')) {
+  console.error('Usage: node deploy-vks.mjs <PACKAGE_ID>');
+  console.error('Example: node deploy-vks.mjs 0x1234...');
+  process.exit(1);
+}
 
 // Load verifying keys from JSON
 const keysPath = path.join(__dirname, '..', 'keys', 'verifying_keys.json');
