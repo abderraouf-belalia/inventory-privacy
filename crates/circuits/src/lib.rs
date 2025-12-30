@@ -7,11 +7,17 @@
 //! - `TransferCircuit`: Prove valid transfer between two inventories
 
 pub mod capacity;
+pub mod capacity_smt;
 pub mod commitment;
 pub mod deposit;
 pub mod deposit_capacity;
 pub mod inventory;
 pub mod item_exists;
+pub mod item_exists_smt;
+pub mod signal;
+pub mod smt;
+pub mod smt_commitment;
+pub mod state_transition;
 pub mod transfer;
 pub mod transfer_capacity;
 pub mod volume_lookup;
@@ -32,6 +38,27 @@ pub use volume_lookup::{
     compute_used_volume, lookup_volume, VolumeRegistry, VolumeRegistryVar, MAX_ITEM_TYPES,
 };
 pub use withdraw::WithdrawCircuit;
+
+// SMT v2 exports
+pub use smt::{
+    compute_root_from_path, verify_and_update, verify_membership, MerkleProof, MerkleProofVar,
+    SparseMerkleTree, DEFAULT_DEPTH,
+};
+
+// Signal hash exports
+pub use signal::{
+    compute_signal_hash, compute_signal_hash_var, OpType, SignalInputs, SignalInputsVar,
+};
+
+// SMT commitment exports
+pub use smt_commitment::{
+    create_smt_commitment, create_smt_commitment_var, InventoryState, InventoryStateVar,
+};
+
+// New SMT-based circuit exports (v2)
+pub use state_transition::StateTransitionCircuit;
+pub use item_exists_smt::{compute_item_exists_hash, ItemExistsSMTCircuit};
+pub use capacity_smt::{compute_capacity_hash, CapacitySMTCircuit};
 
 use ark_bn254::Fr;
 
