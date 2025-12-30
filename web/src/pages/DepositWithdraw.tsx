@@ -14,7 +14,7 @@ import {
 } from '../components/OnChainInventorySelector';
 import { useContractAddresses } from '../sui/ContractConfig';
 import { buildWithdrawTx, buildDepositTx, hexToBytes } from '../sui/transactions';
-import { ITEM_NAMES, ITEM_VOLUMES, getVolumeRegistryArray, canDeposit, calculateUsedVolume } from '../types';
+import { ITEM_NAMES, ITEM_VOLUMES, canDeposit, calculateUsedVolume } from '../types';
 import * as api from '../api/client';
 import type { StateTransitionResult } from '../types';
 import type { OnChainInventory } from '../sui/hooks';
@@ -51,6 +51,8 @@ export function DepositWithdraw() {
   const [error, setError] = useState<string | null>(null);
   const [newInventory, setNewInventory] = useState<typeof inventory.slots | null>(null);
   const [txDigest, setTxDigest] = useState<string | null>(null);
+  const [proofTimeMs, setProofTimeMs] = useState<number | null>(null);
+  const [txTimeMs, setTxTimeMs] = useState<number | null>(null);
 
   const currentSlots = mode === 'demo' ? inventory.slots : localData?.slots || [];
   const currentBlinding = mode === 'demo' ? inventory.blinding : localData?.blinding;
@@ -86,6 +88,8 @@ export function DepositWithdraw() {
     setProofResult(null);
     setNewInventory(null);
     setTxDigest(null);
+    setProofTimeMs(null);
+    setTxTimeMs(null);
 
     try {
       const newBlinding = await api.generateBlinding();
@@ -96,7 +100,8 @@ export function DepositWithdraw() {
 
       let updatedSlots: typeof currentSlots;
 
-      // Use the unified state transition API
+      // Use the unified state transition API with timing
+      const proofStart = performance.now();
       const result = await api.proveStateTransition({
         inventory: currentSlots,
         current_volume: currentVolume,
@@ -109,6 +114,8 @@ export function DepositWithdraw() {
         max_capacity: currentMaxCapacity,
         op_type: operation,
       });
+      const proofEnd = performance.now();
+      setProofTimeMs(Math.round(proofEnd - proofStart));
 
       if (operation === 'withdraw') {
         updatedSlots = currentSlots
@@ -147,6 +154,7 @@ export function DepositWithdraw() {
   ) => {
     if (!selectedOnChainInventory || !effectiveAddress) return;
 
+    const txStart = performance.now();
     try {
       const proofBytes = hexToBytes(result.proof);
       const signalHashBytes = hexToBytes(result.public_inputs[0]);
@@ -198,6 +206,9 @@ export function DepositWithdraw() {
       } else {
         throw new Error('No signer available');
       }
+
+      const txEnd = performance.now();
+      setTxTimeMs(Math.round(txEnd - txStart));
 
       const effects = txResult.effects as { status?: { status: string; error?: string } } | undefined;
       if (effects?.status?.status === 'success') {
@@ -452,7 +463,15 @@ export function DepositWithdraw() {
         <div className="col">
           {txDigest && (
             <div className="alert alert-success">
-              <div>[OK] ON-CHAIN {operation.toUpperCase()} SUCCESSFUL</div>
+              <div className="row-between">
+                <span>[OK] ON-CHAIN {operation.toUpperCase()} SUCCESSFUL</span>
+                {(proofTimeMs !== null || txTimeMs !== null) && (
+                  <span className="text-small">
+                    {proofTimeMs !== null && <span className="badge">{proofTimeMs}ms proof</span>}
+                    {txTimeMs !== null && <span className="badge" style={{ marginLeft: '0.5ch' }}>{txTimeMs}ms tx</span>}
+                  </span>
+                )}
+              </div>
               <div className="text-small mt-1">Transaction executed on Sui blockchain.</div>
               <code className="text-break text-small">{txDigest}</code>
             </div>
@@ -519,9 +538,14 @@ export function DepositWithdraw() {
               result={proofResult}
               title={`${operation === 'withdraw' ? 'Withdrawal' : 'Deposit'} Proof`}
               extra={
-                <div className="text-small text-success">
-                  [OK] Proved valid {operation} of <strong>{amount}</strong>{' '}
-                  <strong>{ITEM_NAMES[itemId] || `Item #${itemId}`}</strong>.
+                <div className="row-between">
+                  <span className="text-small text-success">
+                    [OK] Proved valid {operation} of <strong>{amount}</strong>{' '}
+                    <strong>{ITEM_NAMES[itemId] || `Item #${itemId}`}</strong>.
+                  </span>
+                  {proofTimeMs !== null && (
+                    <span className="badge">{proofTimeMs}ms</span>
+                  )}
                 </div>
               }
             />

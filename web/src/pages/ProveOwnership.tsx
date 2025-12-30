@@ -40,6 +40,8 @@ export function ProveOwnership() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [onChainVerified, setOnChainVerified] = useState<boolean | null>(null);
+  const [proofTimeMs, setProofTimeMs] = useState<number | null>(null);
+  const [verifyTimeMs, setVerifyTimeMs] = useState<number | null>(null);
 
   const currentSlots = mode === 'demo' ? inventory.slots : localData?.slots || [];
   const currentBlinding = mode === 'demo' ? inventory.blinding : localData?.blinding;
@@ -70,9 +72,12 @@ export function ProveOwnership() {
     setError(null);
     setProofResult(null);
     setOnChainVerified(null);
+    setProofTimeMs(null);
+    setVerifyTimeMs(null);
 
     try {
       const currentVolume = calculateUsedVolume(currentSlots);
+      const proofStart = performance.now();
       const result = await api.proveItemExists(
         currentSlots,
         currentVolume,
@@ -80,6 +85,8 @@ export function ProveOwnership() {
         selectedItemId,
         minQuantity
       );
+      const proofEnd = performance.now();
+      setProofTimeMs(Math.round(proofEnd - proofStart));
       setProofResult(result);
 
       if (mode === 'onchain' && selectedOnChainInventory && account) {
@@ -95,21 +102,25 @@ export function ProveOwnership() {
   const verifyOnChain = async (result: ProofResultType) => {
     if (!selectedOnChainInventory || !account) return;
 
+    const verifyStart = performance.now();
     try {
       const proofBytes = hexToBytes(result.proof);
+      const signalHashBytes = hexToBytes(result.public_inputs[0]);
       const tx = buildVerifyItemExistsTx(
         packageId,
         selectedOnChainInventory.id,
         verifyingKeysId,
         proofBytes,
-        selectedItemId,
-        BigInt(minQuantity)
+        signalHashBytes
       );
 
       const devInspectResult = await client.devInspectTransactionBlock({
         transactionBlock: tx as unknown as Parameters<typeof client.devInspectTransactionBlock>[0]['transactionBlock'],
         sender: account.address,
       });
+
+      const verifyEnd = performance.now();
+      setVerifyTimeMs(Math.round(verifyEnd - verifyStart));
 
       const returnValues = devInspectResult.results?.[0]?.returnValues;
       if (returnValues && returnValues.length > 0) {
@@ -300,7 +311,15 @@ export function ProveOwnership() {
             <div className={`alert ${onChainVerified ? 'alert-success' : 'alert-error'}`}>
               {onChainVerified ? (
                 <>
-                  <div>[OK] ON-CHAIN VERIFICATION PASSED</div>
+                  <div className="row-between">
+                    <span>[OK] ON-CHAIN VERIFICATION PASSED</span>
+                    {(proofTimeMs !== null || verifyTimeMs !== null) && (
+                      <span className="text-small">
+                        {proofTimeMs !== null && <span className="badge">{proofTimeMs}ms proof</span>}
+                        {verifyTimeMs !== null && <span className="badge" style={{ marginLeft: '0.5ch' }}>{verifyTimeMs}ms verify</span>}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-small">The ZK proof was verified on Sui blockchain using Groth16 verification.</div>
                 </>
               ) : (
@@ -320,10 +339,13 @@ export function ProveOwnership() {
               result={proofResult}
               title="Ownership Proof Generated"
               extra={
-                <div className="text-small text-success">
-                  [OK] Proved ownership of{' '}
-                  <strong>{ITEM_NAMES[selectedItemId] || `Item #${selectedItemId}`}</strong>{' '}
-                  without revealing you have <strong>{selectedItem?.quantity}</strong>.
+                <div className="row-between">
+                  <span className="text-small text-success">
+                    [OK] Proved ownership of{' '}
+                    <strong>{ITEM_NAMES[selectedItemId] || `Item #${selectedItemId}`}</strong>{' '}
+                    without revealing you have <strong>{selectedItem?.quantity}</strong>.
+                  </span>
+                  {proofTimeMs !== null && <span className="badge">{proofTimeMs}ms</span>}
                 </div>
               }
             />
