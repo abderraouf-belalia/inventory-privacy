@@ -14,9 +14,9 @@ import {
 } from '../components/OnChainInventorySelector';
 import { useContractAddresses } from '../sui/ContractConfig';
 import { buildWithdrawTx, buildDepositTx, buildDepositWithCapacityTx, hexToBytes } from '../sui/transactions';
-import { ITEM_NAMES, ITEM_VOLUMES, getVolumeRegistryArray, canDeposit } from '../types';
+import { ITEM_NAMES, ITEM_VOLUMES, getVolumeRegistryArray, canDeposit, calculateUsedVolume } from '../types';
 import * as api from '../api/client';
-import type { DepositResult, WithdrawResult } from '../types';
+import type { StateTransitionResult } from '../types';
 import type { OnChainInventory } from '../sui/hooks';
 import { hasLocalSigner, getLocalAddress, signAndExecuteWithLocalSigner, getLocalnetClient } from '../sui/localSigner';
 
@@ -46,7 +46,7 @@ export function DepositWithdraw() {
   const [operation, setOperation] = useState<Operation>('withdraw');
   const [itemId, setItemId] = useState(1);
   const [amount, setAmount] = useState(30);
-  const [proofResult, setProofResult] = useState<DepositResult | WithdrawResult | null>(null);
+  const [proofResult, setProofResult] = useState<StateTransitionResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [newInventory, setNewInventory] = useState<typeof inventory.slots | null>(null);
@@ -89,45 +89,34 @@ export function DepositWithdraw() {
 
     try {
       const newBlinding = await api.generateBlinding();
+      const currentVolume = calculateUsedVolume(currentSlots);
+      const itemVolume = ITEM_VOLUMES[itemId] ?? 0;
+      // Use a dummy registry root for demo - in production this would come from on-chain
+      const registryRoot = '0x0000000000000000000000000000000000000000000000000000000000000000';
 
-      let result: DepositResult | WithdrawResult;
       let updatedSlots: typeof currentSlots;
 
-      if (operation === 'withdraw') {
-        result = await api.proveWithdraw(
-          currentSlots,
-          currentBlinding,
-          newBlinding,
-          itemId,
-          amount
-        );
+      // Use the unified state transition API
+      const result = await api.proveStateTransition({
+        inventory: currentSlots,
+        current_volume: currentVolume,
+        old_blinding: currentBlinding,
+        new_blinding: newBlinding,
+        item_id: itemId,
+        amount: amount,
+        item_volume: itemVolume,
+        registry_root: registryRoot,
+        max_capacity: currentMaxCapacity,
+        op_type: operation,
+      });
 
+      if (operation === 'withdraw') {
         updatedSlots = currentSlots
           .map((s) =>
             s.item_id === itemId ? { ...s, quantity: s.quantity - amount } : s
           )
           .filter((s) => s.quantity > 0);
       } else {
-        if (hasCapacityLimit) {
-          result = await api.proveDepositWithCapacity(
-            currentSlots,
-            currentBlinding,
-            newBlinding,
-            itemId,
-            amount,
-            currentMaxCapacity,
-            getVolumeRegistryArray()
-          );
-        } else {
-          result = await api.proveDeposit(
-            currentSlots,
-            currentBlinding,
-            newBlinding,
-            itemId,
-            amount
-          );
-        }
-
         const existingIndex = currentSlots.findIndex((s) => s.item_id === itemId);
         if (existingIndex >= 0) {
           updatedSlots = currentSlots.map((s) =>
@@ -152,7 +141,7 @@ export function DepositWithdraw() {
   };
 
   const executeOnChain = async (
-    result: DepositResult | WithdrawResult,
+    result: StateTransitionResult,
     newBlinding: string,
     updatedSlots: typeof currentSlots
   ) => {

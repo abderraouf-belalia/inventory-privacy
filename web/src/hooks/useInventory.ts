@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { Inventory, InventorySlot } from '../types';
+import { calculateUsedVolume } from '../types';
 import * as api from '../api/client';
 
 export function useInventory(initialSlots: InventorySlot[] = []) {
@@ -34,9 +35,10 @@ export function useInventory(initialSlots: InventorySlot[] = []) {
     setLoading(true);
     setError(null);
     try {
-      const commitment = await api.createCommitment(inventory.slots, inventory.blinding);
-      setInventory((prev) => ({ ...prev, commitment }));
-      return commitment;
+      const currentVolume = calculateUsedVolume(inventory.slots);
+      const result = await api.createCommitment(inventory.slots, currentVolume, inventory.blinding);
+      setInventory((prev) => ({ ...prev, commitment: result.commitment }));
+      return result.commitment;
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to create commitment');
       throw err;

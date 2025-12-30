@@ -1,7 +1,7 @@
 {
-    "volumeRegistryId":  "0xfbad60928fdac0b6259d9915996cd33c3731c59ba0e77bb17e22cc4566193529",
-    "timestamp":  "2025-12-29T20:54:32Z",
-    "verifyingKeysId":  "0x4ef3dffaa572af6451ddbad41470fc32837a5ef089cc7a618038cff0922a477b",
-    "packageId":  "0x17ca915a6baa2fb4494aa001c6f785059bf8eb16fc82a6877f6a0a5735adce47",
+    "volumeRegistryId":  "0x65370080f9107be49a968dfbe861bd64e79271206f3a00333ff253e8e607da03",
+    "timestamp":  "2025-12-30T02:46:04Z",
+    "verifyingKeysId":  "0x7ff5fdc5b63df4acddf64cf3f7de2a70ed7a48ed01f043a6699929f582d8a98a",
+    "packageId":  "0x5958da987255d22157e9ff0081643115ac78fb2456d56f38532f2fbf8e9b80f3",
     "network":  "localnet"
 }

@@ -148,3 +148,26 @@ export function getItemVolume(itemId: number): number {
 export function itemsToApiFormat(items: InventoryItem[]): { item_id: number; quantity: number }[] {
   return items.filter(item => item.quantity > 0);
 }
+
+// Get volume registry as array for on-chain operations
+// Returns volumes for item IDs 0-15 in order
+export function getVolumeRegistryArray(): number[] {
+  return [
+    ITEM_VOLUMES[0] ?? 0,   // 0 - empty
+    ITEM_VOLUMES[1] ?? 0,   // 5 - Gold Ore
+    ITEM_VOLUMES[2] ?? 0,   // 3 - Iron Ingot
+    ITEM_VOLUMES[3] ?? 0,   // 8 - Diamond
+    ITEM_VOLUMES[4] ?? 0,   // 2 - Wood
+    ITEM_VOLUMES[5] ?? 0,   // 10 - Stone
+    ITEM_VOLUMES[6] ?? 0,   // 4 - Coal
+    ITEM_VOLUMES[7] ?? 0,   // 15 - Copper
+    ITEM_VOLUMES[8] ?? 0,   // 1 - Silver
+    ITEM_VOLUMES[9] ?? 0,   // 6 - Emerald
+    ITEM_VOLUMES[10] ?? 0,  // 7 - Ruby
+    ITEM_VOLUMES[11] ?? 0,  // 12 - Sapphire
+    ITEM_VOLUMES[12] ?? 0,  // 9 - Steel
+    ITEM_VOLUMES[13] ?? 0,  // 20 - Titanium
+    ITEM_VOLUMES[14] ?? 0,  // 11 - Platinum
+    ITEM_VOLUMES[15] ?? 0,  // 25 - Crystal
+  ];
+}

@@ -1,5 +1,5 @@
 import type { InventorySlot } from '../types';
-import { MAX_ITEM_SLOTS, ITEM_NAMES } from '../types';
+import { MAX_DISPLAY_ITEMS, ITEM_NAMES } from '../types';
 import { ItemSlot, EmptySlot } from './ItemSlot';
 
 interface InventoryCardProps {
@@ -25,7 +25,8 @@ export function InventoryCard({
   selectedSlot,
   hideContents = false,
 }: InventoryCardProps) {
-  const emptyCount = MAX_ITEM_SLOTS - slots.length;
+  // Show a few empty slots for visual indication (max 4)
+  const emptyCount = Math.min(4, MAX_DISPLAY_ITEMS - slots.length);
 
   return (
     <div className="card">
@@ -41,7 +42,7 @@ export function InventoryCard({
 
         {hideContents ? (
           <div className="grid grid-4 mb-2">
-            {Array.from({ length: MAX_ITEM_SLOTS }).map((_, i) => (
+            {Array.from({ length: Math.min(16, slots.length || 8) }).map((_, i) => (
               <div key={i} className="item-slot empty">
                 <span className="text-muted">?</span>
               </div>

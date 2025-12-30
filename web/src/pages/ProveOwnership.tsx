@@ -12,7 +12,7 @@ import {
 } from '../components/OnChainInventorySelector';
 import { useContractAddresses } from '../sui/ContractConfig';
 import { buildVerifyItemExistsTx, hexToBytes } from '../sui/transactions';
-import { ITEM_NAMES } from '../types';
+import { ITEM_NAMES, calculateUsedVolume } from '../types';
 import * as api from '../api/client';
 import type { ProofResult as ProofResultType } from '../types';
 import type { OnChainInventory } from '../sui/hooks';
@@ -72,9 +72,11 @@ export function ProveOwnership() {
     setOnChainVerified(null);
 
     try {
+      const currentVolume = calculateUsedVolume(currentSlots);
       const result = await api.proveItemExists(
         currentSlots,
-        currentBlinding,
+        currentVolume,
+        currentBlinding!,
         selectedItemId,
         minQuantity
       );

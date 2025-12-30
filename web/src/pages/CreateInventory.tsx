@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useInventory } from '../hooks/useInventory';
 import { InventoryCard } from '../components/InventoryCard';
 import { CapacityBar } from '../components/CapacityBar';
-import { ITEM_NAMES, MAX_ITEM_SLOTS, ITEM_VOLUMES, canDeposit } from '../types';
+import { ITEM_NAMES, MAX_DISPLAY_ITEMS, ITEM_VOLUMES, canDeposit } from '../types';
 
 export function CreateInventory() {
   const {
@@ -21,7 +21,7 @@ export function CreateInventory() {
   const [maxCapacity, setMaxCapacity] = useState(1000);
 
   const handleAddItem = () => {
-    if (inventory.slots.length >= MAX_ITEM_SLOTS) {
+    if (inventory.slots.length >= MAX_DISPLAY_ITEMS) {
       return;
     }
     if (maxCapacity > 0 && !canDeposit(inventory.slots, newItemId, newQuantity, maxCapacity)) {
@@ -139,11 +139,11 @@ export function CreateInventory() {
               ) : (
                 <button
                   onClick={() => setShowAddForm(true)}
-                  disabled={inventory.slots.length >= MAX_ITEM_SLOTS}
+                  disabled={inventory.slots.length >= MAX_DISPLAY_ITEMS}
                   className="btn btn-secondary"
                   style={{ width: '100%' }}
                 >
-                  [+] ADD ITEM ({inventory.slots.length}/{MAX_ITEM_SLOTS})
+                  [+] ADD ITEM ({inventory.slots.length})
                 </button>
               )}
 
@@ -219,7 +219,7 @@ export function CreateInventory() {
             blinding={inventory.blinding}
             showBlinding={true}
             onEmptyClick={
-              inventory.slots.length < MAX_ITEM_SLOTS
+              inventory.slots.length < MAX_DISPLAY_ITEMS
                 ? () => setShowAddForm(true)
                 : undefined
             }
