@@ -44,8 +44,9 @@ export function OnChain() {
 
     try {
       const blinding = await api.generateBlinding();
-      const commitment = await api.createCommitment(newInventory, blinding);
-      const commitmentBytes = hexToBytes(commitment);
+      const currentVolume = calculateUsedVolume(newInventory);
+      const commitmentResult = await api.createCommitment(newInventory, currentVolume, blinding);
+      const commitmentBytes = hexToBytes(commitmentResult.commitment);
       const tx = buildCreateInventoryWithCapacityTx(packageId, commitmentBytes, BigInt(maxCapacity), effectiveAddress);
 
       let result;

@@ -13,7 +13,7 @@ import {
   type LocalInventoryData,
 } from '../components/OnChainInventorySelector';
 import { useContractAddresses } from '../sui/ContractConfig';
-import { buildWithdrawTx, buildDepositTx, buildDepositWithCapacityTx, hexToBytes } from '../sui/transactions';
+import { buildWithdrawTx, buildDepositTx, hexToBytes } from '../sui/transactions';
 import { ITEM_NAMES, ITEM_VOLUMES, getVolumeRegistryArray, canDeposit, calculateUsedVolume } from '../types';
 import * as api from '../api/client';
 import type { StateTransitionResult } from '../types';
@@ -149,6 +149,7 @@ export function DepositWithdraw() {
 
     try {
       const proofBytes = hexToBytes(result.proof);
+      const signalHashBytes = hexToBytes(result.public_inputs[0]);
       const newCommitmentBytes = hexToBytes(result.new_commitment);
 
       let tx;
@@ -158,27 +159,19 @@ export function DepositWithdraw() {
           selectedOnChainInventory.id,
           verifyingKeysId,
           proofBytes,
-          newCommitmentBytes,
-          itemId,
-          BigInt(amount)
-        );
-      } else if (hasCapacityLimit) {
-        tx = buildDepositWithCapacityTx(
-          packageId,
-          selectedOnChainInventory.id,
-          volumeRegistryId,
-          verifyingKeysId,
-          proofBytes,
+          signalHashBytes,
           newCommitmentBytes,
           itemId,
           BigInt(amount)
         );
       } else {
+        // Both deposit and deposit with capacity now use the same unified function
         tx = buildDepositTx(
           packageId,
           selectedOnChainInventory.id,
           verifyingKeysId,
           proofBytes,
+          signalHashBytes,
           newCommitmentBytes,
           itemId,
           BigInt(amount)

@@ -30,15 +30,14 @@ export function buildCreateInventoryTx(
 }
 
 /**
- * Build transaction to verify item exists (read-only, no state change)
+ * Build transaction to verify item exists (read-only, no state change, SMT-based)
  */
 export function buildVerifyItemExistsTx(
   packageId: string,
   inventoryId: string,
   verifyingKeysId: string,
   proof: Uint8Array,
-  itemId: number,
-  minQuantity: bigint
+  publicHash: Uint8Array
 ): Transaction {
   const tx = new Transaction();
 
@@ -48,8 +47,7 @@ export function buildVerifyItemExistsTx(
       tx.object(inventoryId),
       tx.object(verifyingKeysId),
       tx.pure.vector('u8', Array.from(proof)),
-      tx.pure.u32(itemId),
-      tx.pure.u64(minQuantity),
+      tx.pure.vector('u8', Array.from(publicHash)),
     ],
   });
 
@@ -57,13 +55,14 @@ export function buildVerifyItemExistsTx(
 }
 
 /**
- * Build transaction to withdraw items
+ * Build transaction to withdraw items (SMT-based with signal hash)
  */
 export function buildWithdrawTx(
   packageId: string,
   inventoryId: string,
   verifyingKeysId: string,
   proof: Uint8Array,
+  signalHash: Uint8Array,
   newCommitment: Uint8Array,
   itemId: number,
   amount: bigint
@@ -76,8 +75,9 @@ export function buildWithdrawTx(
       tx.object(inventoryId),
       tx.object(verifyingKeysId),
       tx.pure.vector('u8', Array.from(proof)),
+      tx.pure.vector('u8', Array.from(signalHash)),
       tx.pure.vector('u8', Array.from(newCommitment)),
-      tx.pure.u32(itemId),
+      tx.pure.u64(itemId),
       tx.pure.u64(amount),
     ],
   });
@@ -86,13 +86,14 @@ export function buildWithdrawTx(
 }
 
 /**
- * Build transaction to deposit items
+ * Build transaction to deposit items (SMT-based with signal hash)
  */
 export function buildDepositTx(
   packageId: string,
   inventoryId: string,
   verifyingKeysId: string,
   proof: Uint8Array,
+  signalHash: Uint8Array,
   newCommitment: Uint8Array,
   itemId: number,
   amount: bigint
@@ -105,8 +106,9 @@ export function buildDepositTx(
       tx.object(inventoryId),
       tx.object(verifyingKeysId),
       tx.pure.vector('u8', Array.from(proof)),
+      tx.pure.vector('u8', Array.from(signalHash)),
       tx.pure.vector('u8', Array.from(newCommitment)),
-      tx.pure.u32(itemId),
+      tx.pure.u64(itemId),
       tx.pure.u64(amount),
     ],
   });
@@ -115,15 +117,18 @@ export function buildDepositTx(
 }
 
 /**
- * Build transaction to transfer items between inventories
+ * Build transaction to transfer items between inventories (SMT-based with signal hashes)
  */
 export function buildTransferTx(
   packageId: string,
   srcInventoryId: string,
   dstInventoryId: string,
   verifyingKeysId: string,
-  proof: Uint8Array,
+  srcProof: Uint8Array,
+  srcSignalHash: Uint8Array,
   srcNewCommitment: Uint8Array,
+  dstProof: Uint8Array,
+  dstSignalHash: Uint8Array,
   dstNewCommitment: Uint8Array,
   itemId: number,
   amount: bigint
@@ -136,10 +141,13 @@ export function buildTransferTx(
       tx.object(srcInventoryId),
       tx.object(dstInventoryId),
       tx.object(verifyingKeysId),
-      tx.pure.vector('u8', Array.from(proof)),
+      tx.pure.vector('u8', Array.from(srcProof)),
+      tx.pure.vector('u8', Array.from(srcSignalHash)),
       tx.pure.vector('u8', Array.from(srcNewCommitment)),
+      tx.pure.vector('u8', Array.from(dstProof)),
+      tx.pure.vector('u8', Array.from(dstSignalHash)),
       tx.pure.vector('u8', Array.from(dstNewCommitment)),
-      tx.pure.u32(itemId),
+      tx.pure.u64(itemId),
       tx.pure.u64(amount),
     ],
   });
