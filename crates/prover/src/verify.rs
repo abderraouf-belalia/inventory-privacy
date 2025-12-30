@@ -1,4 +1,4 @@
-//! Local proof verification for testing.
+//! Local proof verification for testing SMT-based circuits.
 
 use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Groth16, Proof, VerifyingKey};
@@ -14,80 +14,37 @@ pub enum VerifyError {
     InvalidInputs,
 }
 
-/// Verify an ItemExists proof
+/// Verify a StateTransition proof (uses signal hash as single public input)
+pub fn verify_state_transition(
+    vk: &VerifyingKey<Bn254>,
+    proof: &Proof<Bn254>,
+    signal_hash: Fr,
+) -> Result<bool, VerifyError> {
+    let public_inputs = vec![signal_hash];
+
+    Groth16::<Bn254>::verify(vk, &public_inputs, proof)
+        .map_err(|e| VerifyError::Verification(e.to_string()))
+}
+
+/// Verify an ItemExists proof (uses public hash as single input)
 pub fn verify_item_exists(
     vk: &VerifyingKey<Bn254>,
     proof: &Proof<Bn254>,
-    commitment: Fr,
-    item_id: u32,
-    min_quantity: u64,
+    public_hash: Fr,
 ) -> Result<bool, VerifyError> {
-    let public_inputs = vec![commitment, Fr::from(item_id as u64), Fr::from(min_quantity)];
+    let public_inputs = vec![public_hash];
 
     Groth16::<Bn254>::verify(vk, &public_inputs, proof)
         .map_err(|e| VerifyError::Verification(e.to_string()))
 }
 
-/// Verify a Withdraw proof
-pub fn verify_withdraw(
+/// Verify a Capacity proof (uses public hash as single input)
+pub fn verify_capacity(
     vk: &VerifyingKey<Bn254>,
     proof: &Proof<Bn254>,
-    old_commitment: Fr,
-    new_commitment: Fr,
-    item_id: u32,
-    amount: u64,
+    public_hash: Fr,
 ) -> Result<bool, VerifyError> {
-    let public_inputs = vec![
-        old_commitment,
-        new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-    ];
-
-    Groth16::<Bn254>::verify(vk, &public_inputs, proof)
-        .map_err(|e| VerifyError::Verification(e.to_string()))
-}
-
-/// Verify a Deposit proof
-pub fn verify_deposit(
-    vk: &VerifyingKey<Bn254>,
-    proof: &Proof<Bn254>,
-    old_commitment: Fr,
-    new_commitment: Fr,
-    item_id: u32,
-    amount: u64,
-) -> Result<bool, VerifyError> {
-    let public_inputs = vec![
-        old_commitment,
-        new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-    ];
-
-    Groth16::<Bn254>::verify(vk, &public_inputs, proof)
-        .map_err(|e| VerifyError::Verification(e.to_string()))
-}
-
-/// Verify a Transfer proof
-#[allow(clippy::too_many_arguments)]
-pub fn verify_transfer(
-    vk: &VerifyingKey<Bn254>,
-    proof: &Proof<Bn254>,
-    src_old_commitment: Fr,
-    src_new_commitment: Fr,
-    dst_old_commitment: Fr,
-    dst_new_commitment: Fr,
-    item_id: u32,
-    amount: u64,
-) -> Result<bool, VerifyError> {
-    let public_inputs = vec![
-        src_old_commitment,
-        src_new_commitment,
-        dst_old_commitment,
-        dst_new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-    ];
+    let public_inputs = vec![public_hash];
 
     Groth16::<Bn254>::verify(vk, &public_inputs, proof)
         .map_err(|e| VerifyError::Verification(e.to_string()))
@@ -96,10 +53,10 @@ pub fn verify_transfer(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::prove::prove_item_exists;
-    use crate::setup::setup_item_exists;
+    use crate::prove::{prove_capacity, prove_item_exists, InventoryState};
+    use crate::setup::{setup_capacity, setup_item_exists};
     use ark_std::rand::{rngs::StdRng, SeedableRng};
-    use inventory_circuits::{commitment::poseidon_config, Inventory};
+    use inventory_circuits::poseidon_config;
     use std::sync::Arc;
 
     #[test]
@@ -108,20 +65,20 @@ mod tests {
         let config = Arc::new(poseidon_config::<Fr>());
         let keys = setup_item_exists(&mut rng, config.clone()).unwrap();
 
-        let inventory = Inventory::from_items(&[(1, 100)]);
+        // Create inventory with item
         let blinding = Fr::from(12345u64);
-        let commitment =
-            inventory_circuits::commitment::create_inventory_commitment(&inventory, blinding, &config);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(42, 100);
+        state.current_volume = 500;
 
-        let proof_result =
-            prove_item_exists(&keys.proving_key, &inventory, blinding, 1, 50).unwrap();
+        // Generate proof
+        let proof_result = prove_item_exists(&keys.proving_key, &state, 42, 50).unwrap();
 
+        // Verify with correct public hash
         let valid = verify_item_exists(
             &keys.verifying_key,
             &proof_result.proof,
-            commitment,
-            1,
-            50,
+            proof_result.public_inputs[0],
         )
         .unwrap();
 
@@ -129,29 +86,47 @@ mod tests {
     }
 
     #[test]
-    fn test_verify_wrong_inputs_fails() {
+    fn test_verify_wrong_hash_fails() {
         let mut rng = StdRng::seed_from_u64(42);
         let config = Arc::new(poseidon_config::<Fr>());
         let keys = setup_item_exists(&mut rng, config.clone()).unwrap();
 
-        let inventory = Inventory::from_items(&[(1, 100)]);
+        // Create inventory with item
         let blinding = Fr::from(12345u64);
-        let commitment =
-            inventory_circuits::commitment::create_inventory_commitment(&inventory, blinding, &config);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(42, 100);
+        state.current_volume = 500;
 
-        let proof_result =
-            prove_item_exists(&keys.proving_key, &inventory, blinding, 1, 50).unwrap();
+        // Generate proof
+        let proof_result = prove_item_exists(&keys.proving_key, &state, 42, 50).unwrap();
 
-        // Try to verify with wrong min_quantity
-        let valid = verify_item_exists(
+        // Try to verify with wrong public hash
+        let wrong_hash = Fr::from(99999u64);
+        let valid = verify_item_exists(&keys.verifying_key, &proof_result.proof, wrong_hash).unwrap();
+
+        assert!(!valid);
+    }
+
+    #[test]
+    fn test_verify_capacity() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let config = Arc::new(poseidon_config::<Fr>());
+        let keys = setup_capacity(&mut rng, config.clone()).unwrap();
+
+        let blinding = Fr::from(12345u64);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(1, 100);
+        state.current_volume = 500;
+
+        let proof_result = prove_capacity(&keys.proving_key, &state, 1000).unwrap();
+
+        let valid = verify_capacity(
             &keys.verifying_key,
             &proof_result.proof,
-            commitment,
-            1,
-            200, // Wrong! We proved >= 50
+            proof_result.public_inputs[0],
         )
         .unwrap();
 
-        assert!(!valid);
+        assert!(valid);
     }
 }

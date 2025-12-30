@@ -1,4 +1,4 @@
-//! Proof generation for inventory circuits.
+//! Proof generation for SMT-based inventory circuits.
 
 use std::sync::Arc;
 
@@ -10,10 +10,11 @@ use ark_std::rand::{rngs::StdRng, SeedableRng};
 use thiserror::Error;
 
 use inventory_circuits::{
-    commitment::{create_inventory_commitment, poseidon_config},
-    compute_registry_hash, CapacityProofCircuit, DepositCircuit, DepositWithCapacityCircuit,
-    Inventory, ItemExistsCircuit, TransferCircuit, TransferWithCapacityCircuit, VolumeRegistry,
-    WithdrawCircuit,
+    poseidon_config,
+    signal::OpType,
+    smt::{MerkleProof, SparseMerkleTree, DEFAULT_DEPTH},
+    smt_commitment::create_smt_commitment,
+    CapacitySMTCircuit, ItemExistsSMTCircuit, StateTransitionCircuit,
 };
 
 /// Errors during proof generation
@@ -27,7 +28,7 @@ pub enum ProveError {
     Serialization(String),
 }
 
-/// A proof with its public inputs
+/// A proof with its public inputs (signal hash)
 #[derive(Clone)]
 pub struct ProofWithInputs {
     pub proof: Proof<Bn254>,
@@ -61,496 +62,468 @@ impl ProofWithInputs {
     }
 }
 
-/// Generate proof for ItemExistsCircuit
+/// Client-side inventory state using SMT
+#[derive(Clone)]
+pub struct InventoryState {
+    /// Sparse Merkle Tree storing items
+    pub tree: SparseMerkleTree<Fr>,
+    /// Current total volume
+    pub current_volume: u64,
+    /// Blinding factor for commitment
+    pub blinding: Fr,
+}
+
+impl InventoryState {
+    /// Create a new empty inventory state
+    pub fn new(blinding: Fr) -> Self {
+        let config = Arc::new(poseidon_config::<Fr>());
+        Self {
+            tree: SparseMerkleTree::new(DEFAULT_DEPTH, config),
+            current_volume: 0,
+            blinding,
+        }
+    }
+
+    /// Create inventory state from items
+    pub fn from_items(items: &[(u64, u64)], blinding: Fr) -> Self {
+        let config = Arc::new(poseidon_config::<Fr>());
+        let tree = SparseMerkleTree::from_items(items, DEFAULT_DEPTH, config);
+        Self {
+            tree,
+            current_volume: 0, // Volume must be set separately
+            blinding,
+        }
+    }
+
+    /// Get the inventory SMT root
+    pub fn root(&self) -> Fr {
+        self.tree.root()
+    }
+
+    /// Get quantity of an item
+    pub fn get_quantity(&self, item_id: u64) -> u64 {
+        self.tree.get(item_id)
+    }
+
+    /// Get Merkle proof for an item
+    pub fn get_proof(&self, item_id: u64) -> MerkleProof<Fr> {
+        self.tree.get_proof(item_id)
+    }
+
+    /// Compute the commitment for this inventory state
+    pub fn commitment(&self) -> Fr {
+        let config = Arc::new(poseidon_config::<Fr>());
+        create_smt_commitment(
+            self.tree.root(),
+            self.current_volume,
+            self.blinding,
+            &config,
+        )
+    }
+
+    /// Deposit items (returns updated state and proof)
+    pub fn deposit(
+        &self,
+        item_id: u64,
+        amount: u64,
+        item_volume: u64,
+        new_blinding: Fr,
+    ) -> Result<(InventoryState, MerkleProof<Fr>), ProveError> {
+        let old_qty = self.get_quantity(item_id);
+        let new_qty = old_qty.checked_add(amount)
+            .ok_or_else(|| ProveError::InvalidState("Quantity overflow".into()))?;
+
+        // Get proof before update
+        let proof = self.get_proof(item_id);
+
+        // Update tree
+        let mut new_tree = self.tree.clone();
+        new_tree.update(item_id, new_qty);
+
+        // Update volume
+        let volume_delta = amount * item_volume;
+        let new_volume = self.current_volume.checked_add(volume_delta)
+            .ok_or_else(|| ProveError::InvalidState("Volume overflow".into()))?;
+
+        Ok((
+            InventoryState {
+                tree: new_tree,
+                current_volume: new_volume,
+                blinding: new_blinding,
+            },
+            proof,
+        ))
+    }
+
+    /// Withdraw items (returns updated state and proof)
+    pub fn withdraw(
+        &self,
+        item_id: u64,
+        amount: u64,
+        item_volume: u64,
+        new_blinding: Fr,
+    ) -> Result<(InventoryState, MerkleProof<Fr>), ProveError> {
+        let old_qty = self.get_quantity(item_id);
+        if old_qty < amount {
+            return Err(ProveError::InvalidState(format!(
+                "Insufficient quantity: have {}, need {}",
+                old_qty, amount
+            )));
+        }
+        let new_qty = old_qty - amount;
+
+        // Get proof before update
+        let proof = self.get_proof(item_id);
+
+        // Update tree (setting to 0 removes the item)
+        let mut new_tree = self.tree.clone();
+        new_tree.update(item_id, new_qty);
+
+        // Update volume
+        let volume_delta = amount * item_volume;
+        let new_volume = self.current_volume.saturating_sub(volume_delta);
+
+        Ok((
+            InventoryState {
+                tree: new_tree,
+                current_volume: new_volume,
+                blinding: new_blinding,
+            },
+            proof,
+        ))
+    }
+}
+
+/// Result of a state transition proof
+pub struct StateTransitionResult {
+    pub proof: ProofWithInputs,
+    pub new_state: InventoryState,
+    pub new_commitment: Fr,
+}
+
+/// Generate proof for StateTransitionCircuit (deposit or withdraw)
+#[allow(clippy::too_many_arguments)]
+pub fn prove_state_transition(
+    pk: &ProvingKey<Bn254>,
+    old_state: &InventoryState,
+    new_blinding: Fr,
+    item_id: u64,
+    amount: u64,
+    item_volume: u64,
+    registry_root: Fr,
+    max_capacity: u64,
+    op_type: OpType,
+) -> Result<StateTransitionResult, ProveError> {
+    let config = Arc::new(poseidon_config::<Fr>());
+
+    // Get old quantities and proof
+    let old_quantity = old_state.get_quantity(item_id);
+    let inventory_proof = old_state.get_proof(item_id);
+
+    // Compute new state
+    let (new_quantity, new_volume) = match op_type {
+        OpType::Deposit => {
+            let new_qty = old_quantity.checked_add(amount)
+                .ok_or_else(|| ProveError::InvalidState("Quantity overflow".into()))?;
+            let volume_delta = amount * item_volume;
+            let new_vol = old_state.current_volume.checked_add(volume_delta)
+                .ok_or_else(|| ProveError::InvalidState("Volume overflow".into()))?;
+            if new_vol > max_capacity {
+                return Err(ProveError::InvalidState(format!(
+                    "Capacity exceeded: {} > {}",
+                    new_vol, max_capacity
+                )));
+            }
+            (new_qty, new_vol)
+        }
+        OpType::Withdraw => {
+            if old_quantity < amount {
+                return Err(ProveError::InvalidState(format!(
+                    "Insufficient quantity: have {}, need {}",
+                    old_quantity, amount
+                )));
+            }
+            let new_qty = old_quantity - amount;
+            let volume_delta = amount * item_volume;
+            let new_vol = old_state.current_volume.saturating_sub(volume_delta);
+            (new_qty, new_vol)
+        }
+    };
+
+    // Create new tree state
+    let mut new_tree = old_state.tree.clone();
+    new_tree.update(item_id, new_quantity);
+
+    let new_state = InventoryState {
+        tree: new_tree,
+        current_volume: new_volume,
+        blinding: new_blinding,
+    };
+
+    let new_commitment = new_state.commitment();
+
+    // Create circuit
+    let circuit = StateTransitionCircuit::new(
+        old_state.tree.root(),
+        old_state.current_volume,
+        old_state.blinding,
+        new_state.tree.root(),
+        new_volume,
+        new_blinding,
+        item_id,
+        old_quantity,
+        new_quantity,
+        amount,
+        op_type,
+        inventory_proof,
+        item_volume,
+        registry_root,
+        max_capacity,
+        config,
+    );
+
+    let signal_hash = circuit.signal_hash.unwrap();
+
+    // Generate proof
+    let mut rng = StdRng::from_entropy();
+    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
+        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
+
+    Ok(StateTransitionResult {
+        proof: ProofWithInputs {
+            proof,
+            public_inputs: vec![signal_hash],
+        },
+        new_state,
+        new_commitment,
+    })
+}
+
+/// Generate proof for ItemExistsSMTCircuit
 pub fn prove_item_exists(
     pk: &ProvingKey<Bn254>,
-    inventory: &Inventory,
-    blinding: Fr,
-    item_id: u32,
+    state: &InventoryState,
+    item_id: u64,
     min_quantity: u64,
 ) -> Result<ProofWithInputs, ProveError> {
     let config = Arc::new(poseidon_config::<Fr>());
-    let commitment = create_inventory_commitment(inventory, blinding, &config);
 
-    // Verify the claim is valid
-    let actual_qty = inventory.get_quantity(item_id);
-    if actual_qty < min_quantity {
+    // Get actual quantity and proof
+    let actual_quantity = state.get_quantity(item_id);
+    if actual_quantity < min_quantity {
         return Err(ProveError::InvalidState(format!(
-            "Insufficient quantity: have {}, need {}",
-            actual_qty, min_quantity
+            "Insufficient quantity: have {}, need >= {}",
+            actual_quantity, min_quantity
         )));
     }
 
-    let circuit = ItemExistsCircuit::new(
-        inventory.clone(),
-        blinding,
-        commitment,
+    let proof = state.get_proof(item_id);
+
+    // Create circuit
+    let circuit = ItemExistsSMTCircuit::new(
+        state.tree.root(),
+        state.current_volume,
+        state.blinding,
         item_id,
+        actual_quantity,
         min_quantity,
+        proof,
         config,
     );
 
+    let public_hash = circuit.public_hash.unwrap();
+
+    // Generate proof
     let mut rng = StdRng::from_entropy();
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
+    let zk_proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
         .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
 
-    let public_inputs = vec![commitment, Fr::from(item_id as u64), Fr::from(min_quantity)];
-
     Ok(ProofWithInputs {
-        proof,
-        public_inputs,
+        proof: zk_proof,
+        public_inputs: vec![public_hash],
     })
 }
 
-/// Generate proof for WithdrawCircuit
-pub fn prove_withdraw(
-    pk: &ProvingKey<Bn254>,
-    old_inventory: &Inventory,
-    old_blinding: Fr,
-    new_blinding: Fr,
-    item_id: u32,
-    amount: u64,
-) -> Result<(ProofWithInputs, Inventory, Fr), ProveError> {
-    let config = Arc::new(poseidon_config::<Fr>());
-    let old_commitment = create_inventory_commitment(old_inventory, old_blinding, &config);
-
-    // Create new inventory state
-    let mut new_inventory = old_inventory.clone();
-    new_inventory
-        .withdraw(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(e.to_string()))?;
-
-    let new_commitment = create_inventory_commitment(&new_inventory, new_blinding, &config);
-
-    let circuit = WithdrawCircuit::new(
-        old_inventory.clone(),
-        new_inventory.clone(),
-        old_blinding,
-        new_blinding,
-        old_commitment,
-        new_commitment,
-        item_id,
-        amount,
-        config,
-    );
-
-    let mut rng = StdRng::from_entropy();
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
-        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
-
-    let public_inputs = vec![
-        old_commitment,
-        new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-    ];
-
-    Ok((
-        ProofWithInputs {
-            proof,
-            public_inputs,
-        },
-        new_inventory,
-        new_commitment,
-    ))
-}
-
-/// Generate proof for DepositCircuit
-pub fn prove_deposit(
-    pk: &ProvingKey<Bn254>,
-    old_inventory: &Inventory,
-    old_blinding: Fr,
-    new_blinding: Fr,
-    item_id: u32,
-    amount: u64,
-) -> Result<(ProofWithInputs, Inventory, Fr), ProveError> {
-    let config = Arc::new(poseidon_config::<Fr>());
-    let old_commitment = create_inventory_commitment(old_inventory, old_blinding, &config);
-
-    // Create new inventory state
-    let mut new_inventory = old_inventory.clone();
-    new_inventory
-        .deposit(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(e.to_string()))?;
-
-    let new_commitment = create_inventory_commitment(&new_inventory, new_blinding, &config);
-
-    let circuit = DepositCircuit::new(
-        old_inventory.clone(),
-        new_inventory.clone(),
-        old_blinding,
-        new_blinding,
-        old_commitment,
-        new_commitment,
-        item_id,
-        amount,
-        config,
-    );
-
-    let mut rng = StdRng::from_entropy();
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
-        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
-
-    let public_inputs = vec![
-        old_commitment,
-        new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-    ];
-
-    Ok((
-        ProofWithInputs {
-            proof,
-            public_inputs,
-        },
-        new_inventory,
-        new_commitment,
-    ))
-}
-
-/// Generate proof for TransferCircuit
-#[allow(clippy::too_many_arguments)]
-pub fn prove_transfer(
-    pk: &ProvingKey<Bn254>,
-    src_old_inventory: &Inventory,
-    src_old_blinding: Fr,
-    src_new_blinding: Fr,
-    dst_old_inventory: &Inventory,
-    dst_old_blinding: Fr,
-    dst_new_blinding: Fr,
-    item_id: u32,
-    amount: u64,
-) -> Result<(ProofWithInputs, Inventory, Fr, Inventory, Fr), ProveError> {
-    let config = Arc::new(poseidon_config::<Fr>());
-
-    // Compute old commitments
-    let src_old_commitment =
-        create_inventory_commitment(src_old_inventory, src_old_blinding, &config);
-    let dst_old_commitment =
-        create_inventory_commitment(dst_old_inventory, dst_old_blinding, &config);
-
-    // Create new inventory states
-    let mut src_new_inventory = src_old_inventory.clone();
-    src_new_inventory
-        .withdraw(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(format!("Source: {}", e)))?;
-
-    let mut dst_new_inventory = dst_old_inventory.clone();
-    dst_new_inventory
-        .deposit(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(format!("Destination: {}", e)))?;
-
-    // Compute new commitments
-    let src_new_commitment =
-        create_inventory_commitment(&src_new_inventory, src_new_blinding, &config);
-    let dst_new_commitment =
-        create_inventory_commitment(&dst_new_inventory, dst_new_blinding, &config);
-
-    let circuit = TransferCircuit::new(
-        src_old_inventory.clone(),
-        src_new_inventory.clone(),
-        src_old_blinding,
-        src_new_blinding,
-        dst_old_inventory.clone(),
-        dst_new_inventory.clone(),
-        dst_old_blinding,
-        dst_new_blinding,
-        src_old_commitment,
-        src_new_commitment,
-        dst_old_commitment,
-        dst_new_commitment,
-        item_id,
-        amount,
-        config,
-    );
-
-    let mut rng = StdRng::from_entropy();
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
-        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
-
-    let public_inputs = vec![
-        src_old_commitment,
-        src_new_commitment,
-        dst_old_commitment,
-        dst_new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-    ];
-
-    Ok((
-        ProofWithInputs {
-            proof,
-            public_inputs,
-        },
-        src_new_inventory,
-        src_new_commitment,
-        dst_new_inventory,
-        dst_new_commitment,
-    ))
-}
-
-// ============================================================================
-// Capacity-aware proof functions
-// ============================================================================
-
-/// Generate proof for CapacityProofCircuit
+/// Generate proof for CapacitySMTCircuit
 pub fn prove_capacity(
     pk: &ProvingKey<Bn254>,
-    inventory: &Inventory,
-    blinding: Fr,
+    state: &InventoryState,
     max_capacity: u64,
-    volume_registry: &VolumeRegistry,
 ) -> Result<ProofWithInputs, ProveError> {
     let config = Arc::new(poseidon_config::<Fr>());
-    let commitment = create_inventory_commitment(inventory, blinding, &config);
-    let registry_hash = compute_registry_hash(volume_registry, &config);
 
-    // Verify capacity is not exceeded
-    let used_volume = volume_registry.calculate_used_volume(inventory);
-    if used_volume > max_capacity {
+    // Verify capacity compliance
+    if state.current_volume > max_capacity {
         return Err(ProveError::InvalidState(format!(
-            "Capacity exceeded: using {}, max {}",
-            used_volume, max_capacity
+            "Volume exceeds capacity: {} > {}",
+            state.current_volume, max_capacity
         )));
     }
 
-    let circuit = CapacityProofCircuit::new(
-        inventory.clone(),
-        blinding,
-        commitment,
+    // Create circuit
+    let circuit = CapacitySMTCircuit::new(
+        state.tree.root(),
+        state.current_volume,
+        state.blinding,
         max_capacity,
-        registry_hash,
-        volume_registry.clone(),
         config,
     );
 
+    let public_hash = circuit.public_hash.unwrap();
+
+    // Generate proof
     let mut rng = StdRng::from_entropy();
     let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
         .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
-
-    // Public inputs: commitment, max_capacity, registry_hash
-    // Note: volume_registry is now a private witness (not public input)
-    // to stay within Sui's 8 public input limit
-    let public_inputs = vec![commitment, Fr::from(max_capacity), registry_hash];
 
     Ok(ProofWithInputs {
         proof,
-        public_inputs,
+        public_inputs: vec![public_hash],
     })
-}
-
-/// Generate proof for DepositWithCapacityCircuit
-#[allow(clippy::too_many_arguments)]
-pub fn prove_deposit_with_capacity(
-    pk: &ProvingKey<Bn254>,
-    old_inventory: &Inventory,
-    old_blinding: Fr,
-    new_blinding: Fr,
-    item_id: u32,
-    amount: u64,
-    max_capacity: u64,
-    volume_registry: &VolumeRegistry,
-) -> Result<(ProofWithInputs, Inventory, Fr), ProveError> {
-    let config = Arc::new(poseidon_config::<Fr>());
-    let old_commitment = create_inventory_commitment(old_inventory, old_blinding, &config);
-    let registry_hash = compute_registry_hash(volume_registry, &config);
-
-    // Create new inventory state
-    let mut new_inventory = old_inventory.clone();
-    new_inventory
-        .deposit(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(e.to_string()))?;
-
-    // Verify capacity won't be exceeded
-    let new_used_volume = volume_registry.calculate_used_volume(&new_inventory);
-    if new_used_volume > max_capacity {
-        return Err(ProveError::InvalidState(format!(
-            "Capacity would be exceeded: {} > {}",
-            new_used_volume, max_capacity
-        )));
-    }
-
-    let new_commitment = create_inventory_commitment(&new_inventory, new_blinding, &config);
-
-    let circuit = DepositWithCapacityCircuit::new(
-        old_inventory.clone(),
-        new_inventory.clone(),
-        old_blinding,
-        new_blinding,
-        old_commitment,
-        new_commitment,
-        item_id,
-        amount,
-        max_capacity,
-        registry_hash,
-        volume_registry.clone(),
-        config,
-    );
-
-    let mut rng = StdRng::from_entropy();
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
-        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
-
-    // Public inputs: old_commitment, new_commitment, item_id, amount, max_capacity, registry_hash
-    // Note: volume_registry is now a private witness (not public input)
-    // to stay within Sui's 8 public input limit
-    let public_inputs = vec![
-        old_commitment,
-        new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-        Fr::from(max_capacity),
-        registry_hash,
-    ];
-
-    Ok((
-        ProofWithInputs {
-            proof,
-            public_inputs,
-        },
-        new_inventory,
-        new_commitment,
-    ))
-}
-
-/// Generate proof for TransferWithCapacityCircuit
-#[allow(clippy::too_many_arguments)]
-pub fn prove_transfer_with_capacity(
-    pk: &ProvingKey<Bn254>,
-    src_old_inventory: &Inventory,
-    src_old_blinding: Fr,
-    src_new_blinding: Fr,
-    dst_old_inventory: &Inventory,
-    dst_old_blinding: Fr,
-    dst_new_blinding: Fr,
-    item_id: u32,
-    amount: u64,
-    dst_max_capacity: u64,
-    volume_registry: &VolumeRegistry,
-) -> Result<(ProofWithInputs, Inventory, Fr, Inventory, Fr), ProveError> {
-    let config = Arc::new(poseidon_config::<Fr>());
-    let registry_hash = compute_registry_hash(volume_registry, &config);
-
-    // Compute old commitments
-    let src_old_commitment =
-        create_inventory_commitment(src_old_inventory, src_old_blinding, &config);
-    let dst_old_commitment =
-        create_inventory_commitment(dst_old_inventory, dst_old_blinding, &config);
-
-    // Create new inventory states
-    let mut src_new_inventory = src_old_inventory.clone();
-    src_new_inventory
-        .withdraw(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(format!("Source: {}", e)))?;
-
-    let mut dst_new_inventory = dst_old_inventory.clone();
-    dst_new_inventory
-        .deposit(item_id, amount)
-        .map_err(|e| ProveError::InvalidState(format!("Destination: {}", e)))?;
-
-    // Verify destination capacity won't be exceeded
-    let dst_new_volume = volume_registry.calculate_used_volume(&dst_new_inventory);
-    if dst_new_volume > dst_max_capacity {
-        return Err(ProveError::InvalidState(format!(
-            "Destination capacity would be exceeded: {} > {}",
-            dst_new_volume, dst_max_capacity
-        )));
-    }
-
-    // Compute new commitments
-    let src_new_commitment =
-        create_inventory_commitment(&src_new_inventory, src_new_blinding, &config);
-    let dst_new_commitment =
-        create_inventory_commitment(&dst_new_inventory, dst_new_blinding, &config);
-
-    let circuit = TransferWithCapacityCircuit::new(
-        src_old_inventory.clone(),
-        src_new_inventory.clone(),
-        src_old_blinding,
-        src_new_blinding,
-        dst_old_inventory.clone(),
-        dst_new_inventory.clone(),
-        dst_old_blinding,
-        dst_new_blinding,
-        src_old_commitment,
-        src_new_commitment,
-        dst_old_commitment,
-        dst_new_commitment,
-        item_id,
-        amount,
-        dst_max_capacity,
-        registry_hash,
-        volume_registry.clone(),
-        config,
-    );
-
-    let mut rng = StdRng::from_entropy();
-    let proof = Groth16::<Bn254>::prove(pk, circuit, &mut rng)
-        .map_err(|e| ProveError::ProofGeneration(e.to_string()))?;
-
-    // Public inputs: 4 commitments + item_id + amount + dst_max_capacity + registry_hash = 8 inputs
-    // Note: volume_registry is now a private witness (not public input)
-    // to stay exactly at Sui's 8 public input limit
-    let public_inputs = vec![
-        src_old_commitment,
-        src_new_commitment,
-        dst_old_commitment,
-        dst_new_commitment,
-        Fr::from(item_id as u64),
-        Fr::from(amount),
-        Fr::from(dst_max_capacity),
-        registry_hash,
-    ];
-
-    Ok((
-        ProofWithInputs {
-            proof,
-            public_inputs,
-        },
-        src_new_inventory,
-        src_new_commitment,
-        dst_new_inventory,
-        dst_new_commitment,
-    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::setup::{setup_item_exists, setup_withdraw};
+    use crate::setup::{setup_capacity, setup_item_exists, setup_state_transition};
     use ark_std::rand::SeedableRng;
+
+    fn setup_config() -> Arc<ark_crypto_primitives::sponge::poseidon::PoseidonConfig<Fr>> {
+        Arc::new(poseidon_config::<Fr>())
+    }
 
     #[test]
     fn test_prove_item_exists() {
         let mut rng = StdRng::seed_from_u64(42);
-        let config = Arc::new(poseidon_config::<Fr>());
-        let keys = setup_item_exists(&mut rng, config).unwrap();
+        let config = setup_config();
+        let keys = setup_item_exists(&mut rng, config.clone()).unwrap();
 
-        let inventory = Inventory::from_items(&[(1, 100), (2, 50)]);
+        // Create inventory with item
         let blinding = Fr::from(12345u64);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(42, 100);
+        state.current_volume = 500;
 
-        let result = prove_item_exists(&keys.proving_key, &inventory, blinding, 1, 50);
+        // Prove we have at least 50 of item 42
+        let result = prove_item_exists(&keys.proving_key, &state, 42, 50);
         assert!(result.is_ok());
 
-        let proof_with_inputs = result.unwrap();
-        assert_eq!(proof_with_inputs.public_inputs.len(), 3);
+        let proof = result.unwrap();
+        assert_eq!(proof.public_inputs.len(), 1); // Single signal hash
     }
 
     #[test]
-    fn test_prove_withdraw() {
+    fn test_prove_item_exists_insufficient() {
         let mut rng = StdRng::seed_from_u64(42);
-        let config = Arc::new(poseidon_config::<Fr>());
-        let keys = setup_withdraw(&mut rng, config).unwrap();
+        let config = setup_config();
+        let keys = setup_item_exists(&mut rng, config.clone()).unwrap();
 
-        let inventory = Inventory::from_items(&[(1, 100)]);
-        let old_blinding = Fr::from(12345u64);
-        let new_blinding = Fr::from(67890u64);
+        let blinding = Fr::from(12345u64);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(42, 30);
+        state.current_volume = 300;
 
-        let result = prove_withdraw(&keys.proving_key, &inventory, old_blinding, new_blinding, 1, 30);
+        // Try to prove we have 50 when we only have 30
+        let result = prove_item_exists(&keys.proving_key, &state, 42, 50);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prove_capacity() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let config = setup_config();
+        let keys = setup_capacity(&mut rng, config.clone()).unwrap();
+
+        let blinding = Fr::from(12345u64);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(1, 100);
+        state.current_volume = 500; // Below max
+
+        let result = prove_capacity(&keys.proving_key, &state, 1000);
         assert!(result.is_ok());
 
-        let (proof_with_inputs, new_inventory, _) = result.unwrap();
-        assert_eq!(proof_with_inputs.public_inputs.len(), 4);
-        assert_eq!(new_inventory.get_quantity(1), 70);
+        let proof = result.unwrap();
+        assert_eq!(proof.public_inputs.len(), 1);
+    }
+
+    #[test]
+    fn test_prove_capacity_exceeded() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let config = setup_config();
+        let keys = setup_capacity(&mut rng, config.clone()).unwrap();
+
+        let blinding = Fr::from(12345u64);
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(1, 100);
+        state.current_volume = 1500; // Above max
+
+        let result = prove_capacity(&keys.proving_key, &state, 1000);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_prove_state_transition_deposit() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let config = setup_config();
+        let keys = setup_state_transition(&mut rng, config.clone()).unwrap();
+
+        let blinding = Fr::from(12345u64);
+        let new_blinding = Fr::from(67890u64);
+        let state = InventoryState::new(blinding);
+
+        // Simple registry root (would normally come from on-chain registry)
+        let registry_root = Fr::from(99999u64);
+
+        let result = prove_state_transition(
+            &keys.proving_key,
+            &state,
+            new_blinding,
+            1,    // item_id
+            5,    // amount
+            10,   // item_volume
+            registry_root,
+            1000, // max_capacity
+            OpType::Deposit,
+        );
+
+        assert!(result.is_ok());
+        let res = result.unwrap();
+        assert_eq!(res.proof.public_inputs.len(), 1);
+        assert_eq!(res.new_state.current_volume, 50); // 5 * 10
+    }
+
+    #[test]
+    fn test_prove_state_transition_withdraw() {
+        let mut rng = StdRng::seed_from_u64(42);
+        let config = setup_config();
+        let keys = setup_state_transition(&mut rng, config.clone()).unwrap();
+
+        let blinding = Fr::from(12345u64);
+        let new_blinding = Fr::from(67890u64);
+
+        // Create state with some items
+        let mut state = InventoryState::new(blinding);
+        state.tree.update(1, 100);
+        state.current_volume = 1000; // 100 items * 10 volume each
+
+        // Registry root
+        let registry_root = Fr::from(99999u64);
+
+        let result = prove_state_transition(
+            &keys.proving_key,
+            &state,
+            new_blinding,
+            1,    // item_id
+            30,   // amount to withdraw
+            10,   // item_volume
+            registry_root,
+            1000, // max_capacity
+            OpType::Withdraw,
+        );
+
+        assert!(result.is_ok());
+        let res = result.unwrap();
+        assert_eq!(res.new_state.current_volume, 700); // 1000 - 30*10
+        assert_eq!(res.new_state.get_quantity(1), 70); // 100 - 30
     }
 }

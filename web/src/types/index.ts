@@ -1,10 +1,23 @@
-export interface InventorySlot {
+// SMT-based inventory types
+
+export interface InventoryItem {
   item_id: number;
   quantity: number;
 }
 
+// Deprecated alias for backward compatibility
+export type InventorySlot = InventoryItem;
+
+export interface InventoryState {
+  items: InventoryItem[];
+  currentVolume: number;
+  blinding: string;
+  commitment: string | null;
+}
+
+// Legacy type alias
 export interface Inventory {
-  slots: InventorySlot[];
+  slots: InventoryItem[];
   blinding: string;
   commitment: string | null;
 }
@@ -14,6 +27,12 @@ export interface ProofResult {
   public_inputs: string[];
 }
 
+export interface StateTransitionResult extends ProofResult {
+  new_commitment: string;
+  new_volume: number;
+}
+
+// Legacy aliases for backward compatibility
 export interface WithdrawResult extends ProofResult {
   new_commitment: string;
 }
@@ -31,7 +50,8 @@ export interface ApiError {
   error: string;
 }
 
-export const MAX_ITEM_SLOTS = 16;
+// SMT can handle up to 4096 items with depth 12, but we limit UI display
+export const MAX_DISPLAY_ITEMS = 100;
 
 export const ITEM_NAMES: Record<number, string> = {
   1: 'Gold Ore',
@@ -72,27 +92,25 @@ export const ITEM_COLORS: Record<number, string> = {
 };
 
 // Volume per unit for each item type (index 0 = empty slot = 0 volume)
-// MUST match the VolumeRegistry deployed on-chain!
-export const ITEM_VOLUMES: number[] = [
-  0,  // 0: empty slot
-  5,  // 1: Gold Ore
-  3,  // 2: Iron Ingot
-  8,  // 3: Diamond
-  2,  // 4: Wood
-  10, // 5: Stone
-  4,  // 6: Coal
-  15, // 7: Copper
-  1,  // 8: Silver
-  6,  // 9: Emerald
-  7,  // 10: Ruby
-  12, // 11: Sapphire
-  9,  // 12: Steel
-  20, // 13: Titanium
-  11, // 14: Platinum
-  25, // 15: Crystal
-];
-
-export const MAX_ITEM_TYPES = 16;
+export const ITEM_VOLUMES: Record<number, number> = {
+  0: 0,   // empty
+  1: 5,   // Gold Ore
+  2: 3,   // Iron Ingot
+  3: 8,   // Diamond
+  4: 2,   // Wood
+  5: 10,  // Stone
+  6: 4,   // Coal
+  7: 15,  // Copper
+  8: 1,   // Silver
+  9: 6,   // Emerald
+  10: 7,  // Ruby
+  11: 12, // Sapphire
+  12: 9,  // Steel
+  13: 20, // Titanium
+  14: 11, // Platinum
+  15: 25, // Crystal
+  16: 30, // Obsidian
+};
 
 export interface CapacityInfo {
   usedVolume: number;
@@ -100,37 +118,33 @@ export interface CapacityInfo {
   availableSpace: number;
 }
 
-export interface VolumeRegistry {
-  volumes: number[];
-  registryHash: string;
-}
-
-// Calculate used volume from inventory slots
-export function calculateUsedVolume(slots: InventorySlot[]): number {
-  return slots.reduce((total, slot) => {
-    const volumePerUnit = ITEM_VOLUMES[slot.item_id] ?? 0;
-    return total + (slot.quantity * volumePerUnit);
+// Calculate used volume from inventory items
+export function calculateUsedVolume(items: InventoryItem[]): number {
+  return items.reduce((total, item) => {
+    const volumePerUnit = ITEM_VOLUMES[item.item_id] ?? 0;
+    return total + (item.quantity * volumePerUnit);
   }, 0);
 }
 
 // Check if deposit would exceed capacity
 export function canDeposit(
-  currentSlots: InventorySlot[],
+  currentItems: InventoryItem[],
   itemId: number,
   amount: number,
   maxCapacity: number
 ): boolean {
   if (maxCapacity === 0) return true; // No capacity limit
-  const currentVolume = calculateUsedVolume(currentSlots);
+  const currentVolume = calculateUsedVolume(currentItems);
   const additionalVolume = (ITEM_VOLUMES[itemId] ?? 0) * amount;
   return (currentVolume + additionalVolume) <= maxCapacity;
 }
 
-// Get volume registry as array for API calls
-export function getVolumeRegistryArray(): number[] {
-  const volumes = new Array(MAX_ITEM_TYPES).fill(0);
-  for (let i = 0; i < ITEM_VOLUMES.length && i < MAX_ITEM_TYPES; i++) {
-    volumes[i] = ITEM_VOLUMES[i];
-  }
-  return volumes;
+// Get item volume
+export function getItemVolume(itemId: number): number {
+  return ITEM_VOLUMES[itemId] ?? 0;
+}
+
+// Convert items to API format
+export function itemsToApiFormat(items: InventoryItem[]): { item_id: number; quantity: number }[] {
+  return items.filter(item => item.quantity > 0);
 }

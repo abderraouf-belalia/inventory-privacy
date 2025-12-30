@@ -1,4 +1,4 @@
-//! HTTP request handlers for proof generation.
+//! HTTP request handlers for SMT-based proof generation.
 
 use std::sync::Arc;
 
@@ -16,10 +16,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::RwLock;
 
 use inventory_circuits::{
-    commitment::{create_inventory_commitment, poseidon_config},
-    Inventory, VolumeRegistry, MAX_ITEM_TYPES,
+    poseidon_config,
+    signal::OpType,
+    smt::{SparseMerkleTree, DEFAULT_DEPTH},
+    smt_commitment::create_smt_commitment,
 };
-use inventory_prover::prove;
+use inventory_prover::{prove, InventoryState};
 
 use crate::AppState;
 
@@ -33,17 +35,24 @@ pub async fn health() -> Json<HealthResponse> {
     Json(HealthResponse { status: "ok" })
 }
 
-/// Inventory slot in API requests
+/// Item in inventory for API requests
 #[derive(Debug, Deserialize)]
-pub struct SlotRequest {
-    pub item_id: u32,
+pub struct ItemRequest {
+    pub item_id: u64,
     pub quantity: u64,
 }
 
-/// Convert API inventory to internal format
-fn parse_inventory(slots: &[SlotRequest]) -> Inventory {
-    let items: Vec<(u32, u64)> = slots.iter().map(|s| (s.item_id, s.quantity)).collect();
-    Inventory::from_items(&items)
+/// Create an InventoryState from API request items
+fn parse_inventory_state(items: &[ItemRequest], volume: u64, blinding: Fr) -> InventoryState {
+    let config = Arc::new(poseidon_config::<Fr>());
+    let pairs: Vec<(u64, u64)> = items.iter().map(|i| (i.item_id, i.quantity)).collect();
+    let tree = SparseMerkleTree::from_items(&pairs, DEFAULT_DEPTH, config);
+
+    InventoryState {
+        tree,
+        current_volume: volume,
+        blinding,
+    }
 }
 
 /// Parse hex string to Fr
@@ -81,13 +90,119 @@ pub struct ErrorResponse {
     pub error: String,
 }
 
+// ============ State Transition (Deposit/Withdraw) ============
+
+#[derive(Deserialize)]
+pub struct StateTransitionRequest {
+    /// Current inventory items
+    pub inventory: Vec<ItemRequest>,
+    /// Current total volume
+    pub current_volume: u64,
+    /// Current blinding factor
+    pub old_blinding: String,
+    /// New blinding factor
+    pub new_blinding: String,
+    /// Item ID to deposit/withdraw
+    pub item_id: u64,
+    /// Amount to deposit/withdraw
+    pub amount: u64,
+    /// Volume per unit of this item
+    pub item_volume: u64,
+    /// Registry root (for volume lookup verification)
+    pub registry_root: String,
+    /// Maximum allowed capacity
+    pub max_capacity: u64,
+    /// Operation type: "deposit" or "withdraw"
+    pub op_type: String,
+}
+
+#[derive(Serialize)]
+pub struct StateTransitionResponse {
+    pub proof: String,
+    pub public_inputs: Vec<String>,
+    pub new_commitment: String,
+    pub new_volume: u64,
+}
+
+pub async fn prove_state_transition(
+    State(state): State<Arc<RwLock<AppState>>>,
+    Json(req): Json<StateTransitionRequest>,
+) -> impl IntoResponse {
+    let old_blinding = match parse_fr(&req.old_blinding) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
+    };
+
+    let new_blinding = match parse_fr(&req.new_blinding) {
+        Ok(b) => b,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
+    };
+
+    let registry_root = match parse_fr(&req.registry_root) {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
+    };
+
+    let op_type = match req.op_type.to_lowercase().as_str() {
+        "deposit" => OpType::Deposit,
+        "withdraw" => OpType::Withdraw,
+        _ => return (StatusCode::BAD_REQUEST, Json(ErrorResponse {
+            error: "op_type must be 'deposit' or 'withdraw'".to_string()
+        })).into_response(),
+    };
+
+    let inventory_state = parse_inventory_state(&req.inventory, req.current_volume, old_blinding);
+
+    let app_state = state.read().await;
+
+    match prove::prove_state_transition(
+        &app_state.keys.state_transition.proving_key,
+        &inventory_state,
+        new_blinding,
+        req.item_id,
+        req.amount,
+        req.item_volume,
+        registry_root,
+        req.max_capacity,
+        op_type,
+    ) {
+        Ok(result) => {
+            let proof_bytes = result.proof.serialize_proof().unwrap();
+            let response = StateTransitionResponse {
+                proof: format!("0x{}", hex::encode(proof_bytes)),
+                public_inputs: result.proof
+                    .public_inputs
+                    .iter()
+                    .map(serialize_fr)
+                    .collect(),
+                new_commitment: serialize_fr(&result.new_commitment),
+                new_volume: result.new_state.current_volume,
+            };
+            (StatusCode::OK, Json(response)).into_response()
+        }
+        Err(e) => (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponse {
+                error: e.to_string(),
+            }),
+        )
+            .into_response(),
+    }
+}
+
 // ============ Item Exists ============
 
 #[derive(Deserialize)]
 pub struct ItemExistsRequest {
-    pub inventory: Vec<SlotRequest>,
+    /// Current inventory items
+    pub inventory: Vec<ItemRequest>,
+    /// Current total volume
+    pub current_volume: u64,
+    /// Blinding factor
     pub blinding: String,
-    pub item_id: u32,
+    /// Item ID to prove
+    pub item_id: u64,
+    /// Minimum quantity to prove
     pub min_quantity: u64,
 }
 
@@ -95,21 +210,18 @@ pub async fn prove_item_exists(
     State(state): State<Arc<RwLock<AppState>>>,
     Json(req): Json<ItemExistsRequest>,
 ) -> impl IntoResponse {
-    let inventory = parse_inventory(&req.inventory);
-
     let blinding = match parse_fr(&req.blinding) {
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
     };
 
-    let state = state.read().await;
+    let inventory_state = parse_inventory_state(&req.inventory, req.current_volume, blinding);
 
-    // Run proof generation directly - it's fast enough (~150-200ms) and spawn_blocking/threads
-    // add significant overhead due to tracing's thread-local context interfering with Rayon.
+    let app_state = state.read().await;
+
     match prove::prove_item_exists(
-        &state.keys.item_exists.proving_key,
-        &inventory,
-        blinding,
+        &app_state.keys.item_exists.proving_key,
+        &inventory_state,
         req.item_id,
         req.min_quantity,
     ) {
@@ -135,337 +247,37 @@ pub async fn prove_item_exists(
     }
 }
 
-// ============ Withdraw ============
-
-#[derive(Deserialize)]
-pub struct WithdrawRequest {
-    pub old_inventory: Vec<SlotRequest>,
-    pub old_blinding: String,
-    pub new_blinding: String,
-    pub item_id: u32,
-    pub amount: u64,
-}
-
-#[derive(Serialize)]
-pub struct WithdrawResponse {
-    pub proof: String,
-    pub public_inputs: Vec<String>,
-    pub new_commitment: String,
-}
-
-pub async fn prove_withdraw(
-    State(state): State<Arc<RwLock<AppState>>>,
-    Json(req): Json<WithdrawRequest>,
-) -> impl IntoResponse {
-    let old_inventory = parse_inventory(&req.old_inventory);
-
-    let old_blinding = match parse_fr(&req.old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let new_blinding = match parse_fr(&req.new_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let state = state.read().await;
-
-    match prove::prove_withdraw(
-        &state.keys.withdraw.proving_key,
-        &old_inventory,
-        old_blinding,
-        new_blinding,
-        req.item_id,
-        req.amount,
-    ) {
-        Ok((proof_with_inputs, _new_inventory, new_commitment)) => {
-            let proof_bytes = proof_with_inputs.serialize_proof().unwrap();
-            let response = WithdrawResponse {
-                proof: format!("0x{}", hex::encode(proof_bytes)),
-                public_inputs: proof_with_inputs
-                    .public_inputs
-                    .iter()
-                    .map(serialize_fr)
-                    .collect(),
-                new_commitment: serialize_fr(&new_commitment),
-            };
-            (StatusCode::OK, Json(response)).into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-            .into_response(),
-    }
-}
-
-// ============ Deposit ============
-
-#[derive(Deserialize)]
-pub struct DepositRequest {
-    pub old_inventory: Vec<SlotRequest>,
-    pub old_blinding: String,
-    pub new_blinding: String,
-    pub item_id: u32,
-    pub amount: u64,
-}
-
-#[derive(Serialize)]
-pub struct DepositResponse {
-    pub proof: String,
-    pub public_inputs: Vec<String>,
-    pub new_commitment: String,
-}
-
-pub async fn prove_deposit(
-    State(state): State<Arc<RwLock<AppState>>>,
-    Json(req): Json<DepositRequest>,
-) -> impl IntoResponse {
-    let old_inventory = parse_inventory(&req.old_inventory);
-
-    let old_blinding = match parse_fr(&req.old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let new_blinding = match parse_fr(&req.new_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let state = state.read().await;
-
-    match prove::prove_deposit(
-        &state.keys.deposit.proving_key,
-        &old_inventory,
-        old_blinding,
-        new_blinding,
-        req.item_id,
-        req.amount,
-    ) {
-        Ok((proof_with_inputs, _new_inventory, new_commitment)) => {
-            let proof_bytes = proof_with_inputs.serialize_proof().unwrap();
-            let response = DepositResponse {
-                proof: format!("0x{}", hex::encode(proof_bytes)),
-                public_inputs: proof_with_inputs
-                    .public_inputs
-                    .iter()
-                    .map(serialize_fr)
-                    .collect(),
-                new_commitment: serialize_fr(&new_commitment),
-            };
-            (StatusCode::OK, Json(response)).into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-            .into_response(),
-    }
-}
-
-// ============ Transfer ============
-
-#[derive(Deserialize)]
-pub struct TransferRequest {
-    pub src_old_inventory: Vec<SlotRequest>,
-    pub src_old_blinding: String,
-    pub src_new_blinding: String,
-    pub dst_old_inventory: Vec<SlotRequest>,
-    pub dst_old_blinding: String,
-    pub dst_new_blinding: String,
-    pub item_id: u32,
-    pub amount: u64,
-}
-
-#[derive(Serialize)]
-pub struct TransferResponse {
-    pub proof: String,
-    pub public_inputs: Vec<String>,
-    pub src_new_commitment: String,
-    pub dst_new_commitment: String,
-}
-
-pub async fn prove_transfer(
-    State(state): State<Arc<RwLock<AppState>>>,
-    Json(req): Json<TransferRequest>,
-) -> impl IntoResponse {
-    let src_old = parse_inventory(&req.src_old_inventory);
-    let dst_old = parse_inventory(&req.dst_old_inventory);
-
-    let src_old_blinding = match parse_fr(&req.src_old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-    let src_new_blinding = match parse_fr(&req.src_new_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-    let dst_old_blinding = match parse_fr(&req.dst_old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-    let dst_new_blinding = match parse_fr(&req.dst_new_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let state = state.read().await;
-
-    match prove::prove_transfer(
-        &state.keys.transfer.proving_key,
-        &src_old,
-        src_old_blinding,
-        src_new_blinding,
-        &dst_old,
-        dst_old_blinding,
-        dst_new_blinding,
-        req.item_id,
-        req.amount,
-    ) {
-        Ok((proof_with_inputs, _, src_new_commitment, _, dst_new_commitment)) => {
-            let proof_bytes = proof_with_inputs.serialize_proof().unwrap();
-            let response = TransferResponse {
-                proof: format!("0x{}", hex::encode(proof_bytes)),
-                public_inputs: proof_with_inputs
-                    .public_inputs
-                    .iter()
-                    .map(serialize_fr)
-                    .collect(),
-                src_new_commitment: serialize_fr(&src_new_commitment),
-                dst_new_commitment: serialize_fr(&dst_new_commitment),
-            };
-            (StatusCode::OK, Json(response)).into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-            .into_response(),
-    }
-}
-
-// ============ Utilities ============
-
-#[derive(Deserialize)]
-pub struct CreateCommitmentRequest {
-    pub inventory: Vec<SlotRequest>,
-    pub blinding: String,
-}
-
-#[derive(Serialize)]
-pub struct CreateCommitmentResponse {
-    pub commitment: String,
-}
-
-pub async fn create_commitment(
-    Json(req): Json<CreateCommitmentRequest>,
-) -> impl IntoResponse {
-    let inventory = parse_inventory(&req.inventory);
-
-    let blinding = match parse_fr(&req.blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let config = poseidon_config::<Fr>();
-    let commitment = create_inventory_commitment(&inventory, blinding, &config);
-
-    (
-        StatusCode::OK,
-        Json(CreateCommitmentResponse {
-            commitment: serialize_fr(&commitment),
-        }),
-    )
-        .into_response()
-}
-
-#[derive(Serialize)]
-pub struct GenerateBlindingResponse {
-    pub blinding: String,
-}
-
-pub async fn generate_blinding() -> Json<GenerateBlindingResponse> {
-    let mut rng = ark_std::rand::thread_rng();
-    let blinding: Fr = rng.gen();
-
-    Json(GenerateBlindingResponse {
-        blinding: serialize_fr(&blinding),
-    })
-}
-
-// ============ Capacity-Aware Operations ============
-
-/// Parse volume registry from API request (array of 16 u64 values)
-fn parse_volume_registry(volumes: &[u64; MAX_ITEM_TYPES]) -> VolumeRegistry {
-    VolumeRegistry::new(*volumes)
-}
-
-#[derive(Deserialize)]
-pub struct RegistryHashRequest {
-    pub volume_registry: [u64; MAX_ITEM_TYPES],
-}
-
-#[derive(Serialize)]
-pub struct RegistryHashResponse {
-    pub registry_hash: String,
-}
-
-/// Compute the Poseidon hash of a volume registry.
-/// This hash is used as a public input in capacity-aware circuits
-/// and must be stored on-chain in the VolumeRegistry object.
-pub async fn compute_registry_hash_handler(
-    Json(req): Json<RegistryHashRequest>,
-) -> impl IntoResponse {
-    use inventory_circuits::{commitment::poseidon_config, compute_registry_hash};
-
-    let volume_registry = parse_volume_registry(&req.volume_registry);
-    let config = poseidon_config();
-    let hash: Fr = compute_registry_hash(&volume_registry, &config);
-
-    let response = RegistryHashResponse {
-        registry_hash: serialize_fr(&hash),
-    };
-
-    (StatusCode::OK, Json(response))
-}
+// ============ Capacity ============
 
 #[derive(Deserialize)]
 pub struct CapacityRequest {
-    pub inventory: Vec<SlotRequest>,
+    /// Current inventory items
+    pub inventory: Vec<ItemRequest>,
+    /// Current total volume
+    pub current_volume: u64,
+    /// Blinding factor
     pub blinding: String,
+    /// Maximum allowed capacity
     pub max_capacity: u64,
-    pub volume_registry: [u64; MAX_ITEM_TYPES],
 }
 
 pub async fn prove_capacity(
     State(state): State<Arc<RwLock<AppState>>>,
     Json(req): Json<CapacityRequest>,
 ) -> impl IntoResponse {
-    let inventory = parse_inventory(&req.inventory);
-
     let blinding = match parse_fr(&req.blinding) {
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
     };
 
-    let volume_registry = parse_volume_registry(&req.volume_registry);
+    let inventory_state = parse_inventory_state(&req.inventory, req.current_volume, blinding);
 
-    let state = state.read().await;
+    let app_state = state.read().await;
 
     match prove::prove_capacity(
-        &state.keys.capacity.proving_key,
-        &inventory,
-        blinding,
+        &app_state.keys.capacity.proving_key,
+        &inventory_state,
         req.max_capacity,
-        &volume_registry,
     ) {
         Ok(proof_with_inputs) => {
             let proof_bytes = proof_with_inputs.serialize_proof().unwrap();
@@ -489,145 +301,64 @@ pub async fn prove_capacity(
     }
 }
 
-#[derive(Deserialize)]
-pub struct DepositWithCapacityRequest {
-    pub old_inventory: Vec<SlotRequest>,
-    pub old_blinding: String,
-    pub new_blinding: String,
-    pub item_id: u32,
-    pub amount: u64,
-    pub max_capacity: u64,
-    pub volume_registry: [u64; MAX_ITEM_TYPES],
-}
-
-pub async fn prove_deposit_with_capacity(
-    State(state): State<Arc<RwLock<AppState>>>,
-    Json(req): Json<DepositWithCapacityRequest>,
-) -> impl IntoResponse {
-    let old_inventory = parse_inventory(&req.old_inventory);
-
-    let old_blinding = match parse_fr(&req.old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let new_blinding = match parse_fr(&req.new_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-
-    let volume_registry = parse_volume_registry(&req.volume_registry);
-
-    let state = state.read().await;
-
-    match prove::prove_deposit_with_capacity(
-        &state.keys.deposit_capacity.proving_key,
-        &old_inventory,
-        old_blinding,
-        new_blinding,
-        req.item_id,
-        req.amount,
-        req.max_capacity,
-        &volume_registry,
-    ) {
-        Ok((proof_with_inputs, _new_inventory, new_commitment)) => {
-            let proof_bytes = proof_with_inputs.serialize_proof().unwrap();
-            let response = DepositResponse {
-                proof: format!("0x{}", hex::encode(proof_bytes)),
-                public_inputs: proof_with_inputs
-                    .public_inputs
-                    .iter()
-                    .map(serialize_fr)
-                    .collect(),
-                new_commitment: serialize_fr(&new_commitment),
-            };
-            (StatusCode::OK, Json(response)).into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-            .into_response(),
-    }
-}
+// ============ Utilities ============
 
 #[derive(Deserialize)]
-pub struct TransferWithCapacityRequest {
-    pub src_old_inventory: Vec<SlotRequest>,
-    pub src_old_blinding: String,
-    pub src_new_blinding: String,
-    pub dst_old_inventory: Vec<SlotRequest>,
-    pub dst_old_blinding: String,
-    pub dst_new_blinding: String,
-    pub item_id: u32,
-    pub amount: u64,
-    pub dst_max_capacity: u64,
-    pub volume_registry: [u64; MAX_ITEM_TYPES],
+pub struct CreateCommitmentRequest {
+    /// Inventory items
+    pub inventory: Vec<ItemRequest>,
+    /// Current total volume
+    pub current_volume: u64,
+    /// Blinding factor
+    pub blinding: String,
 }
 
-pub async fn prove_transfer_with_capacity(
-    State(state): State<Arc<RwLock<AppState>>>,
-    Json(req): Json<TransferWithCapacityRequest>,
+#[derive(Serialize)]
+pub struct CreateCommitmentResponse {
+    pub commitment: String,
+    pub inventory_root: String,
+}
+
+pub async fn create_commitment(
+    Json(req): Json<CreateCommitmentRequest>,
 ) -> impl IntoResponse {
-    let src_old = parse_inventory(&req.src_old_inventory);
-    let dst_old = parse_inventory(&req.dst_old_inventory);
-
-    let src_old_blinding = match parse_fr(&req.src_old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-    let src_new_blinding = match parse_fr(&req.src_new_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-    let dst_old_blinding = match parse_fr(&req.dst_old_blinding) {
-        Ok(b) => b,
-        Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
-    };
-    let dst_new_blinding = match parse_fr(&req.dst_new_blinding) {
+    let blinding = match parse_fr(&req.blinding) {
         Ok(b) => b,
         Err(e) => return (StatusCode::BAD_REQUEST, Json(ErrorResponse { error: e })).into_response(),
     };
 
-    let volume_registry = parse_volume_registry(&req.volume_registry);
+    let config = Arc::new(poseidon_config::<Fr>());
+    let pairs: Vec<(u64, u64)> = req.inventory.iter().map(|i| (i.item_id, i.quantity)).collect();
+    let tree = SparseMerkleTree::from_items(&pairs, DEFAULT_DEPTH, config.clone());
 
-    let state = state.read().await;
+    let inventory_root = tree.root();
+    let commitment = create_smt_commitment(
+        inventory_root,
+        req.current_volume,
+        blinding,
+        &config,
+    );
 
-    match prove::prove_transfer_with_capacity(
-        &state.keys.transfer_capacity.proving_key,
-        &src_old,
-        src_old_blinding,
-        src_new_blinding,
-        &dst_old,
-        dst_old_blinding,
-        dst_new_blinding,
-        req.item_id,
-        req.amount,
-        req.dst_max_capacity,
-        &volume_registry,
-    ) {
-        Ok((proof_with_inputs, _, src_new_commitment, _, dst_new_commitment)) => {
-            let proof_bytes = proof_with_inputs.serialize_proof().unwrap();
-            let response = TransferResponse {
-                proof: format!("0x{}", hex::encode(proof_bytes)),
-                public_inputs: proof_with_inputs
-                    .public_inputs
-                    .iter()
-                    .map(serialize_fr)
-                    .collect(),
-                src_new_commitment: serialize_fr(&src_new_commitment),
-                dst_new_commitment: serialize_fr(&dst_new_commitment),
-            };
-            (StatusCode::OK, Json(response)).into_response()
-        }
-        Err(e) => (
-            StatusCode::BAD_REQUEST,
-            Json(ErrorResponse {
-                error: e.to_string(),
-            }),
-        )
-            .into_response(),
-    }
+    (
+        StatusCode::OK,
+        Json(CreateCommitmentResponse {
+            commitment: serialize_fr(&commitment),
+            inventory_root: serialize_fr(&inventory_root),
+        }),
+    )
+        .into_response()
+}
+
+#[derive(Serialize)]
+pub struct GenerateBlindingResponse {
+    pub blinding: String,
+}
+
+pub async fn generate_blinding() -> Json<GenerateBlindingResponse> {
+    let mut rng = ark_std::rand::thread_rng();
+    let blinding: Fr = rng.gen();
+
+    Json(GenerateBlindingResponse {
+        blinding: serialize_fr(&blinding),
+    })
 }

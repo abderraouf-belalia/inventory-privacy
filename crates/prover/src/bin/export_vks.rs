@@ -26,44 +26,24 @@ fn main() {
 
     println!("\n=== Verifying Keys for Sui Deployment ===\n");
 
+    let state_transition_vk = keys.state_transition.serialize_vk().unwrap();
     let item_exists_vk = keys.item_exists.serialize_vk().unwrap();
-    let withdraw_vk = keys.withdraw.serialize_vk().unwrap();
-    let deposit_vk = keys.deposit.serialize_vk().unwrap();
-    let transfer_vk = keys.transfer.serialize_vk().unwrap();
     let capacity_vk = keys.capacity.serialize_vk().unwrap();
-    let deposit_capacity_vk = keys.deposit_capacity.serialize_vk().unwrap();
-    let transfer_capacity_vk = keys.transfer_capacity.serialize_vk().unwrap();
+
+    println!("StateTransition VK ({} bytes):", state_transition_vk.len());
+    println!("0x{}\n", hex::encode(&state_transition_vk));
 
     println!("ItemExists VK ({} bytes):", item_exists_vk.len());
     println!("0x{}\n", hex::encode(&item_exists_vk));
 
-    println!("Withdraw VK ({} bytes):", withdraw_vk.len());
-    println!("0x{}\n", hex::encode(&withdraw_vk));
-
-    println!("Deposit VK ({} bytes):", deposit_vk.len());
-    println!("0x{}\n", hex::encode(&deposit_vk));
-
-    println!("Transfer VK ({} bytes):", transfer_vk.len());
-    println!("0x{}\n", hex::encode(&transfer_vk));
-
     println!("Capacity VK ({} bytes):", capacity_vk.len());
     println!("0x{}\n", hex::encode(&capacity_vk));
 
-    println!("DepositCapacity VK ({} bytes):", deposit_capacity_vk.len());
-    println!("0x{}\n", hex::encode(&deposit_capacity_vk));
-
-    println!("TransferCapacity VK ({} bytes):", transfer_capacity_vk.len());
-    println!("0x{}\n", hex::encode(&transfer_capacity_vk));
-
     // Also export as JSON for scripting
     let json = serde_json::json!({
+        "state_transition_vk": format!("0x{}", hex::encode(&state_transition_vk)),
         "item_exists_vk": format!("0x{}", hex::encode(&item_exists_vk)),
-        "withdraw_vk": format!("0x{}", hex::encode(&withdraw_vk)),
-        "deposit_vk": format!("0x{}", hex::encode(&deposit_vk)),
-        "transfer_vk": format!("0x{}", hex::encode(&transfer_vk)),
         "capacity_vk": format!("0x{}", hex::encode(&capacity_vk)),
-        "deposit_capacity_vk": format!("0x{}", hex::encode(&deposit_capacity_vk)),
-        "transfer_capacity_vk": format!("0x{}", hex::encode(&transfer_capacity_vk)),
     });
 
     let json_path = keys_dir.join("verifying_keys.json");
@@ -74,13 +54,18 @@ fn main() {
     // Export as Move vector literals for easy copy-paste
     println!("\n=== Move Vector Literals ===\n");
     println!("// Copy these into your deployment script");
-    println!("let item_exists_vk = {};", format_as_move_vector(&item_exists_vk));
-    println!("let withdraw_vk = {};", format_as_move_vector(&withdraw_vk));
-    println!("let deposit_vk = {};", format_as_move_vector(&deposit_vk));
-    println!("let transfer_vk = {};", format_as_move_vector(&transfer_vk));
-    println!("let capacity_vk = {};", format_as_move_vector(&capacity_vk));
-    println!("let deposit_capacity_vk = {};", format_as_move_vector(&deposit_capacity_vk));
-    println!("let transfer_capacity_vk = {};", format_as_move_vector(&transfer_capacity_vk));
+    println!(
+        "let state_transition_vk = {};",
+        format_as_move_vector(&state_transition_vk)
+    );
+    println!(
+        "let item_exists_vk = {};",
+        format_as_move_vector(&item_exists_vk)
+    );
+    println!(
+        "let capacity_vk = {};",
+        format_as_move_vector(&capacity_vk)
+    );
 }
 
 fn format_as_move_vector(bytes: &[u8]) -> String {

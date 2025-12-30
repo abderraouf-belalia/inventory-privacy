@@ -1,9 +1,7 @@
 import type {
-  InventorySlot,
+  InventoryItem,
   ProofResult,
-  WithdrawResult,
-  DepositResult,
-  TransferResult,
+  StateTransitionResult,
   ApiError,
 } from '../types';
 
@@ -25,175 +23,215 @@ export async function generateBlinding(): Promise<string> {
   return data.blinding;
 }
 
+export interface CreateCommitmentResult {
+  commitment: string;
+  inventory_root: string;
+}
+
 export async function createCommitment(
-  inventory: InventorySlot[],
+  inventory: InventoryItem[],
+  currentVolume: number,
   blinding: string
-): Promise<string> {
+): Promise<CreateCommitmentResult> {
   const response = await fetch(`${API_BASE}/commitment/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ inventory, blinding }),
+    body: JSON.stringify({
+      inventory,
+      current_volume: currentVolume,
+      blinding,
+    }),
   });
-  const data = await handleResponse<{ commitment: string }>(response);
-  return data.commitment;
+  return handleResponse<CreateCommitmentResult>(response);
 }
 
+// ============ State Transition (Deposit/Withdraw) ============
+
+export interface StateTransitionRequest {
+  inventory: InventoryItem[];
+  current_volume: number;
+  old_blinding: string;
+  new_blinding: string;
+  item_id: number;
+  amount: number;
+  item_volume: number;
+  registry_root: string;
+  max_capacity: number;
+  op_type: 'deposit' | 'withdraw';
+}
+
+export async function proveStateTransition(
+  request: StateTransitionRequest
+): Promise<StateTransitionResult> {
+  const response = await fetch(`${API_BASE}/prove/state-transition`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  });
+  return handleResponse<StateTransitionResult>(response);
+}
+
+// Convenience wrapper for deposit
+export async function proveDeposit(
+  inventory: InventoryItem[],
+  currentVolume: number,
+  oldBlinding: string,
+  newBlinding: string,
+  itemId: number,
+  amount: number,
+  itemVolume: number,
+  registryRoot: string,
+  maxCapacity: number
+): Promise<StateTransitionResult> {
+  return proveStateTransition({
+    inventory,
+    current_volume: currentVolume,
+    old_blinding: oldBlinding,
+    new_blinding: newBlinding,
+    item_id: itemId,
+    amount,
+    item_volume: itemVolume,
+    registry_root: registryRoot,
+    max_capacity: maxCapacity,
+    op_type: 'deposit',
+  });
+}
+
+// Convenience wrapper for withdraw
+export async function proveWithdraw(
+  inventory: InventoryItem[],
+  currentVolume: number,
+  oldBlinding: string,
+  newBlinding: string,
+  itemId: number,
+  amount: number,
+  itemVolume: number,
+  registryRoot: string,
+  maxCapacity: number
+): Promise<StateTransitionResult> {
+  return proveStateTransition({
+    inventory,
+    current_volume: currentVolume,
+    old_blinding: oldBlinding,
+    new_blinding: newBlinding,
+    item_id: itemId,
+    amount,
+    item_volume: itemVolume,
+    registry_root: registryRoot,
+    max_capacity: maxCapacity,
+    op_type: 'withdraw',
+  });
+}
+
+// ============ Item Exists ============
+
 export async function proveItemExists(
-  inventory: InventorySlot[],
+  inventory: InventoryItem[],
+  currentVolume: number,
   blinding: string,
-  item_id: number,
-  min_quantity: number
+  itemId: number,
+  minQuantity: number
 ): Promise<ProofResult> {
   const response = await fetch(`${API_BASE}/prove/item-exists`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ inventory, blinding, item_id, min_quantity }),
+    body: JSON.stringify({
+      inventory,
+      current_volume: currentVolume,
+      blinding,
+      item_id: itemId,
+      min_quantity: minQuantity,
+    }),
   });
   return handleResponse<ProofResult>(response);
 }
 
-export async function proveWithdraw(
-  old_inventory: InventorySlot[],
-  old_blinding: string,
-  new_blinding: string,
-  item_id: number,
-  amount: number
-): Promise<WithdrawResult> {
-  const response = await fetch(`${API_BASE}/prove/withdraw`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      old_inventory,
-      old_blinding,
-      new_blinding,
-      item_id,
-      amount,
-    }),
-  });
-  return handleResponse<WithdrawResult>(response);
-}
-
-export async function proveDeposit(
-  old_inventory: InventorySlot[],
-  old_blinding: string,
-  new_blinding: string,
-  item_id: number,
-  amount: number
-): Promise<DepositResult> {
-  const response = await fetch(`${API_BASE}/prove/deposit`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      old_inventory,
-      old_blinding,
-      new_blinding,
-      item_id,
-      amount,
-    }),
-  });
-  return handleResponse<DepositResult>(response);
-}
-
-export async function proveTransfer(
-  src_old_inventory: InventorySlot[],
-  src_old_blinding: string,
-  src_new_blinding: string,
-  dst_old_inventory: InventorySlot[],
-  dst_old_blinding: string,
-  dst_new_blinding: string,
-  item_id: number,
-  amount: number
-): Promise<TransferResult> {
-  const response = await fetch(`${API_BASE}/prove/transfer`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      src_old_inventory,
-      src_old_blinding,
-      src_new_blinding,
-      dst_old_inventory,
-      dst_old_blinding,
-      dst_new_blinding,
-      item_id,
-      amount,
-    }),
-  });
-  return handleResponse<TransferResult>(response);
-}
-
-// ============ Capacity-Aware Operations ============
+// ============ Capacity ============
 
 export async function proveCapacity(
-  inventory: InventorySlot[],
+  inventory: InventoryItem[],
+  currentVolume: number,
   blinding: string,
-  max_capacity: number,
-  volume_registry: number[]
+  maxCapacity: number
 ): Promise<ProofResult> {
   const response = await fetch(`${API_BASE}/prove/capacity`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       inventory,
+      current_volume: currentVolume,
       blinding,
-      max_capacity,
-      volume_registry,
+      max_capacity: maxCapacity,
     }),
   });
   return handleResponse<ProofResult>(response);
 }
 
-export async function proveDepositWithCapacity(
-  old_inventory: InventorySlot[],
-  old_blinding: string,
-  new_blinding: string,
-  item_id: number,
-  amount: number,
-  max_capacity: number,
-  volume_registry: number[]
-): Promise<DepositResult> {
-  const response = await fetch(`${API_BASE}/prove/deposit-capacity`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      old_inventory,
-      old_blinding,
-      new_blinding,
-      item_id,
-      amount,
-      max_capacity,
-      volume_registry,
-    }),
-  });
-  return handleResponse<DepositResult>(response);
+// ============ Transfer (Two State Transitions) ============
+
+export interface TransferProofs {
+  srcProof: ProofResult;
+  srcNewCommitment: string;
+  srcNewVolume: number;
+  dstProof: ProofResult;
+  dstNewCommitment: string;
+  dstNewVolume: number;
 }
 
-export async function proveTransferWithCapacity(
-  src_old_inventory: InventorySlot[],
-  src_old_blinding: string,
-  src_new_blinding: string,
-  dst_old_inventory: InventorySlot[],
-  dst_old_blinding: string,
-  dst_new_blinding: string,
-  item_id: number,
+export async function proveTransfer(
+  srcInventory: InventoryItem[],
+  srcCurrentVolume: number,
+  srcOldBlinding: string,
+  srcNewBlinding: string,
+  dstInventory: InventoryItem[],
+  dstCurrentVolume: number,
+  dstOldBlinding: string,
+  dstNewBlinding: string,
+  itemId: number,
   amount: number,
-  dst_max_capacity: number,
-  volume_registry: number[]
-): Promise<TransferResult> {
-  const response = await fetch(`${API_BASE}/prove/transfer-capacity`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      src_old_inventory,
-      src_old_blinding,
-      src_new_blinding,
-      dst_old_inventory,
-      dst_old_blinding,
-      dst_new_blinding,
-      item_id,
-      amount,
-      dst_max_capacity,
-      volume_registry,
-    }),
-  });
-  return handleResponse<TransferResult>(response);
+  itemVolume: number,
+  registryRoot: string,
+  srcMaxCapacity: number,
+  dstMaxCapacity: number
+): Promise<TransferProofs> {
+  // Generate withdrawal proof from source
+  const srcResult = await proveWithdraw(
+    srcInventory,
+    srcCurrentVolume,
+    srcOldBlinding,
+    srcNewBlinding,
+    itemId,
+    amount,
+    itemVolume,
+    registryRoot,
+    srcMaxCapacity
+  );
+
+  // Generate deposit proof to destination
+  const dstResult = await proveDeposit(
+    dstInventory,
+    dstCurrentVolume,
+    dstOldBlinding,
+    dstNewBlinding,
+    itemId,
+    amount,
+    itemVolume,
+    registryRoot,
+    dstMaxCapacity
+  );
+
+  return {
+    srcProof: {
+      proof: srcResult.proof,
+      public_inputs: srcResult.public_inputs,
+    },
+    srcNewCommitment: srcResult.new_commitment,
+    srcNewVolume: srcResult.new_volume,
+    dstProof: {
+      proof: dstResult.proof,
+      public_inputs: dstResult.public_inputs,
+    },
+    dstNewCommitment: dstResult.new_commitment,
+    dstNewVolume: dstResult.new_volume,
+  };
 }
