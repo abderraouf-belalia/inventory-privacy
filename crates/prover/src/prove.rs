@@ -228,7 +228,8 @@ pub fn prove_state_transition(
             let volume_delta = amount * item_volume;
             let new_vol = old_state.current_volume.checked_add(volume_delta)
                 .ok_or_else(|| ProveError::InvalidState("Volume overflow".into()))?;
-            if new_vol > max_capacity {
+            // max_capacity of 0 means unlimited
+            if max_capacity > 0 && new_vol > max_capacity {
                 return Err(ProveError::InvalidState(format!(
                     "Capacity exceeded: {} > {}",
                     new_vol, max_capacity
@@ -352,8 +353,8 @@ pub fn prove_capacity(
 ) -> Result<ProofWithInputs, ProveError> {
     let config = Arc::new(poseidon_config::<Fr>());
 
-    // Verify capacity compliance
-    if state.current_volume > max_capacity {
+    // Verify capacity compliance (max_capacity of 0 means unlimited)
+    if max_capacity > 0 && state.current_volume > max_capacity {
         return Err(ProveError::InvalidState(format!(
             "Volume exceeds capacity: {} > {}",
             state.current_volume, max_capacity
