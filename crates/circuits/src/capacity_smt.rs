@@ -63,13 +63,14 @@ pub struct CapacitySMTCircuit<F: PrimeField + Absorb> {
 
 impl<F: PrimeField + Absorb> CapacitySMTCircuit<F> {
     /// Create an empty circuit for setup.
+    /// Uses dummy values that produce valid constraint structure.
     pub fn empty(poseidon_config: Arc<PoseidonConfig<F>>) -> Self {
         Self {
-            public_hash: None,
-            inventory_root: None,
-            current_volume: None,
-            blinding: None,
-            max_capacity: None,
+            public_hash: Some(F::zero()),
+            inventory_root: Some(F::zero()),
+            current_volume: Some(0),
+            blinding: Some(F::zero()),
+            max_capacity: Some(0),
             poseidon_config,
             _marker: PhantomData,
         }

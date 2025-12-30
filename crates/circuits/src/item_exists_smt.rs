@@ -72,16 +72,25 @@ pub struct ItemExistsSMTCircuit<F: PrimeField + Absorb> {
 
 impl<F: PrimeField + Absorb> ItemExistsSMTCircuit<F> {
     /// Create an empty circuit for setup.
+    /// Uses dummy values that produce valid constraint structure.
     pub fn empty(poseidon_config: Arc<PoseidonConfig<F>>) -> Self {
+        use crate::smt::DEFAULT_DEPTH;
+
+        // Create dummy proof with correct depth
+        let dummy_proof = MerkleProof::new(
+            vec![F::zero(); DEFAULT_DEPTH],
+            vec![false; DEFAULT_DEPTH],
+        );
+
         Self {
-            public_hash: None,
-            inventory_root: None,
-            current_volume: None,
-            blinding: None,
-            item_id: None,
-            actual_quantity: None,
-            min_quantity: None,
-            proof: None,
+            public_hash: Some(F::zero()),
+            inventory_root: Some(F::zero()),
+            current_volume: Some(0),
+            blinding: Some(F::zero()),
+            item_id: Some(0),
+            actual_quantity: Some(0),
+            min_quantity: Some(0),
+            proof: Some(dummy_proof),
             poseidon_config,
             _marker: PhantomData,
         }

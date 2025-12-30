@@ -85,24 +85,33 @@ pub struct StateTransitionCircuit<F: PrimeField + Absorb> {
 
 impl<F: PrimeField + Absorb> StateTransitionCircuit<F> {
     /// Create a new empty circuit for setup.
+    /// Uses dummy values that produce valid constraint structure.
     pub fn empty(poseidon_config: Arc<PoseidonConfig<F>>) -> Self {
+        use crate::smt::DEFAULT_DEPTH;
+
+        // Create dummy proof with correct depth
+        let dummy_proof = MerkleProof::new(
+            vec![F::zero(); DEFAULT_DEPTH],
+            vec![false; DEFAULT_DEPTH],
+        );
+
         Self {
-            signal_hash: None,
-            old_inventory_root: None,
-            old_volume: None,
-            old_blinding: None,
-            new_inventory_root: None,
-            new_volume: None,
-            new_blinding: None,
-            item_id: None,
-            old_quantity: None,
-            new_quantity: None,
-            amount: None,
-            op_type: None,
-            inventory_proof: None,
-            item_volume: None,
-            registry_root: None,
-            max_capacity: None,
+            signal_hash: Some(F::zero()),
+            old_inventory_root: Some(F::zero()),
+            old_volume: Some(0),
+            old_blinding: Some(F::zero()),
+            new_inventory_root: Some(F::zero()),
+            new_volume: Some(0),
+            new_blinding: Some(F::zero()),
+            item_id: Some(0),
+            old_quantity: Some(0),
+            new_quantity: Some(0),
+            amount: Some(0),
+            op_type: Some(OpType::Deposit),
+            inventory_proof: Some(dummy_proof),
+            item_volume: Some(0),
+            registry_root: Some(F::zero()),
+            max_capacity: Some(0),
             poseidon_config,
             _marker: PhantomData,
         }
