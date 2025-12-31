@@ -11,12 +11,22 @@ use ark_r1cs_std::{
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 use ark_crypto_primitives::sponge::poseidon::{
     PoseidonConfig,
+    PoseidonSponge,
     constraints::PoseidonSpongeVar,
 };
-use ark_crypto_primitives::sponge::constraints::CryptographicSpongeVar;
-use std::sync::Arc;
+use ark_crypto_primitives::sponge::{CryptographicSponge, constraints::CryptographicSpongeVar};
 
 use super::proof::MerkleProof;
+
+/// Compute the default leaf hash H(0, 0) natively (outside circuit).
+/// This is the hash of an empty slot and is constant for a given Poseidon config.
+/// Precomputing this saves ~300 constraints per verify_and_update call.
+pub fn compute_default_leaf_hash<F: PrimeField + ark_crypto_primitives::sponge::Absorb>(config: &PoseidonConfig<F>) -> F {
+    let inputs = vec![F::zero(), F::zero()];
+    let mut sponge = PoseidonSponge::new(config);
+    sponge.absorb(&inputs);
+    sponge.squeeze_field_elements(1)[0]
+}
 
 /// Circuit variable representation of a Merkle proof.
 #[derive(Clone)]
@@ -142,6 +152,9 @@ pub fn verify_membership<F: PrimeField>(
 /// the default leaf hash H(0, 0) instead of H(item_id, 0). This allows
 /// adding new items to empty slots.
 ///
+/// The `default_leaf_hash` parameter should be precomputed using
+/// `compute_default_leaf_hash()` to save ~300 constraints.
+///
 /// Returns the new root after setting the leaf to new_quantity.
 pub fn verify_and_update<F: PrimeField>(
     cs: ConstraintSystemRef<F>,
@@ -150,17 +163,19 @@ pub fn verify_and_update<F: PrimeField>(
     old_quantity: &FpVar<F>,
     new_quantity: &FpVar<F>,
     proof: &MerkleProofVar<F>,
+    default_leaf_hash: F,
     config: &PoseidonConfig<F>,
 ) -> Result<FpVar<F>, SynthesisError> {
-    // For insertions (old_quantity == 0), use default leaf hash H(0, 0)
+    // For insertions (old_quantity == 0), use precomputed default leaf hash H(0, 0)
     // For updates (old_quantity > 0), use regular hash H(item_id, old_quantity)
     let zero = FpVar::zero();
     let is_insertion = old_quantity.is_eq(&zero)?;
 
-    let default_leaf_hash = hash_leaf(cs.clone(), &zero, &zero, config)?;
+    // Use precomputed constant instead of computing hash_leaf(0, 0) in-circuit
+    let default_leaf_hash_var = FpVar::constant(default_leaf_hash);
     let regular_old_hash = hash_leaf(cs.clone(), item_id, old_quantity, config)?;
 
-    let old_leaf_hash = is_insertion.select(&default_leaf_hash, &regular_old_hash)?;
+    let old_leaf_hash = is_insertion.select(&default_leaf_hash_var, &regular_old_hash)?;
 
     // Verify old state
     let computed_old_root = compute_root_from_path(cs.clone(), &old_leaf_hash, proof, config)?;
@@ -196,6 +211,7 @@ mod gadget_tests {
     use crate::smt::{SparseMerkleTree, DEFAULT_DEPTH};
     use ark_bn254::Fr;
     use ark_relations::r1cs::ConstraintSystem;
+    use std::sync::Arc;
 
     fn setup() -> Arc<PoseidonConfig<Fr>> {
         Arc::new(poseidon_config())
@@ -287,6 +303,9 @@ mod gadget_tests {
         let new_qty_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(150u64))).unwrap();
         let proof_var = MerkleProofVar::new_witness(cs.clone(), &proof).unwrap();
 
+        // Precompute default leaf hash
+        let default_leaf_hash = compute_default_leaf_hash(&config);
+
         let computed_new_root = verify_and_update(
             cs.clone(),
             &old_root_var,
@@ -294,6 +313,7 @@ mod gadget_tests {
             &old_qty_var,
             &new_qty_var,
             &proof_var,
+            default_leaf_hash,
             &config,
         )
         .unwrap();

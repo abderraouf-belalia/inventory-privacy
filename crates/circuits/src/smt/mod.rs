@@ -16,4 +16,5 @@ pub use tree::{SparseMerkleTree, DEFAULT_DEPTH};
 pub use proof::MerkleProof;
 pub use gadgets::{
     MerkleProofVar, verify_membership, verify_and_update, compute_root_from_path,
+    compute_default_leaf_hash,
 };

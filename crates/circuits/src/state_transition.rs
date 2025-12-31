@@ -26,9 +26,9 @@ use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisE
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use crate::range_check::{enforce_geq, enforce_u64_range};
+use crate::range_check::{enforce_geq, enforce_u32_range};
 use crate::signal::{compute_signal_hash, OpType};
-use crate::smt::{verify_and_update, MerkleProof, MerkleProofVar};
+use crate::smt::{verify_and_update, compute_default_leaf_hash, MerkleProof, MerkleProofVar};
 use crate::smt_commitment::create_smt_commitment_var;
 
 /// State Transition Circuit.
@@ -296,6 +296,8 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for StateTransitionCircuit
 
         // === Constraint 1: Verify and update inventory SMT ===
         // This verifies the old state and computes the new root
+        // Precompute default leaf hash outside circuit to save ~300 constraints
+        let default_leaf_hash = compute_default_leaf_hash(&self.poseidon_config);
         let computed_new_root = verify_and_update(
             cs.clone(),
             &old_root_var,
@@ -303,6 +305,7 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for StateTransitionCircuit
             &old_qty_var,
             &new_qty_var,
             &inventory_proof_var,
+            default_leaf_hash,
             &self.poseidon_config,
         )?;
 
@@ -325,8 +328,8 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for StateTransitionCircuit
 
         // === Constraint 3: Range check on new quantity ===
         // Prevents underflow attacks where withdraw > current quantity
-        // If qty_minus_amount wrapped around (negative), it won't fit in 64 bits
-        enforce_u64_range(cs.clone(), &new_qty_var)?;
+        // If qty_minus_amount wrapped around (negative), it won't fit in 32 bits
+        enforce_u32_range(cs.clone(), &new_qty_var)?;
 
         // === Constraint 4: Verify volume change ===
         // volume_delta = item_volume * amount
@@ -342,11 +345,11 @@ impl<F: PrimeField + Absorb> ConstraintSynthesizer<F> for StateTransitionCircuit
 
         // === Constraint 5: Range check on new volume ===
         // Prevents underflow attacks on volume
-        enforce_u64_range(cs.clone(), &new_volume_var)?;
+        enforce_u32_range(cs.clone(), &new_volume_var)?;
 
         // === Constraint 6: Capacity check ===
         // new_volume <= max_capacity
-        // enforce_geq checks that (max_capacity - new_volume) fits in 64 bits
+        // enforce_geq checks that (max_capacity - new_volume) fits in 32 bits
         enforce_geq(cs.clone(), &max_capacity_var, &new_volume_var)?;
 
         // === Constraint 7: Compute commitments ===

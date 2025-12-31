@@ -112,6 +112,7 @@ fn test_circuit_deposit() {
     let proof_var = MerkleProofVar::new_witness(cs.clone(), &proof).unwrap();
 
     // Verify old state and compute new root
+    let default_leaf_hash = compute_default_leaf_hash(&config);
     let computed_new_root = verify_and_update(
         cs.clone(),
         &old_root_var,
@@ -119,6 +120,7 @@ fn test_circuit_deposit() {
         &old_qty_var,
         &new_qty_var,
         &proof_var,
+        default_leaf_hash,
         &config,
     ).unwrap();
 
@@ -155,6 +157,7 @@ fn test_circuit_withdraw() {
     let new_qty_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(70u64))).unwrap();
     let proof_var = MerkleProofVar::new_witness(cs.clone(), &proof).unwrap();
 
+    let default_leaf_hash = compute_default_leaf_hash(&config);
     let computed_new_root = verify_and_update(
         cs.clone(),
         &old_root_var,
@@ -162,6 +165,7 @@ fn test_circuit_withdraw() {
         &old_qty_var,
         &new_qty_var,
         &proof_var,
+        default_leaf_hash,
         &config,
     ).unwrap();
 
@@ -194,6 +198,7 @@ fn test_circuit_new_item() {
     let new_qty_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(100u64))).unwrap();
     let proof_var = MerkleProofVar::new_witness(cs.clone(), &proof).unwrap();
 
+    let default_leaf_hash = compute_default_leaf_hash(&config);
     let computed_new_root = verify_and_update(
         cs.clone(),
         &old_root_var,
@@ -201,6 +206,7 @@ fn test_circuit_new_item() {
         &old_qty_var,
         &new_qty_var,
         &proof_var,
+        default_leaf_hash,
         &config,
     ).unwrap();
 
@@ -236,6 +242,7 @@ fn test_soundness_wrong_old_quantity() {
     let new_qty_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(150u64))).unwrap();
     let proof_var = MerkleProofVar::new_witness(cs.clone(), &proof).unwrap();
 
+    let default_leaf_hash = compute_default_leaf_hash(&config);
     let computed_new_root = verify_and_update(
         cs.clone(),
         &old_root_var,
@@ -243,6 +250,7 @@ fn test_soundness_wrong_old_quantity() {
         &old_qty_var,
         &new_qty_var,
         &proof_var,
+        default_leaf_hash,
         &config,
     ).unwrap();
 
@@ -278,6 +286,7 @@ fn test_soundness_wrong_item_id() {
     let new_qty_var = FpVar::new_witness(cs.clone(), || Ok(Fr::from(150u64))).unwrap();
     let proof_var = MerkleProofVar::new_witness(cs.clone(), &proof).unwrap();
 
+    let default_leaf_hash = compute_default_leaf_hash(&config);
     let computed_new_root = verify_and_update(
         cs.clone(),
         &old_root_var,
@@ -285,6 +294,7 @@ fn test_soundness_wrong_item_id() {
         &old_qty_var,
         &new_qty_var,
         &proof_var,
+        default_leaf_hash,
         &config,
     ).unwrap();
 
