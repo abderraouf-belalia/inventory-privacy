@@ -609,6 +609,8 @@ dependencies = [
  "ark-serialize",
  "ark-snark",
  "ark-std",
+ "num-bigint",
+ "num-traits",
  "rand",
 ]
 

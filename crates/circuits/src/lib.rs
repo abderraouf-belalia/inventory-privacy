@@ -6,6 +6,7 @@
 //! - `CapacitySMTCircuit`: Prove inventory volume is within capacity
 
 // Core modules
+pub mod anemoi; // Anemoi hash function (alternative to Poseidon)
 pub mod commitment; // Poseidon config (shared)
 pub mod range_check; // Range checks for underflow prevention
 pub mod signal;
