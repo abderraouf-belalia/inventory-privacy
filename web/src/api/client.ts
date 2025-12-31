@@ -179,6 +179,224 @@ export async function proveCapacity(
   return handleResponse<ProofResult>(response);
 }
 
+// ============ Batch Operations (Parallel Proof Generation) ============
+
+/** Single operation in a batch */
+export interface BatchOperation {
+  item_id: number;
+  amount: number;
+  item_volume: number;
+  op_type: 'deposit' | 'withdraw';
+}
+
+/** Result of a single operation in a batch */
+export interface BatchOperationResult {
+  proof: string;
+  public_inputs: string[];
+  new_commitment: string;
+  new_volume: number;
+  nonce: number;
+  inventory_id: string;
+  registry_root: string;
+  /** Inventory state after this operation (for chaining) */
+  resultingInventory: InventoryItem[];
+  /** New blinding factor */
+  newBlinding: string;
+}
+
+/** Result of batch operations */
+export interface BatchOperationsResult {
+  operations: BatchOperationResult[];
+  /** Final commitment after all operations */
+  finalCommitment: string;
+  /** Final inventory state */
+  finalInventory: InventoryItem[];
+  /** Final blinding factor */
+  finalBlinding: string;
+  /** Total proof generation time (wall-clock, parallel) */
+  proofTimeMs: number;
+}
+
+/**
+ * Generate proofs for multiple operations in PARALLEL.
+ *
+ * This pre-computes intermediate states and generates all proofs concurrently,
+ * achieving O(1) wall-clock time for proof generation regardless of N operations.
+ *
+ * @param inventory - Current inventory items
+ * @param currentVolume - Current total volume
+ * @param blinding - Current blinding factor
+ * @param operations - Array of operations to perform
+ * @param inventoryId - On-chain inventory object ID
+ * @param startNonce - Starting nonce (will increment for each operation)
+ * @param registryRoot - Registry root for volume validation
+ * @param maxCapacity - Maximum inventory capacity
+ */
+export async function proveBatchOperations(
+  inventory: InventoryItem[],
+  currentVolume: number,
+  blinding: string,
+  operations: BatchOperation[],
+  inventoryId: string,
+  startNonce: number,
+  registryRoot: string,
+  maxCapacity: number
+): Promise<BatchOperationsResult> {
+  if (operations.length === 0) {
+    throw new Error('No operations provided');
+  }
+
+  const proofStart = performance.now();
+
+  // Pre-generate all blinding factors in parallel
+  const blindings = await Promise.all(
+    operations.map(() => generateBlinding())
+  );
+
+  // Pre-compute intermediate states
+  interface IntermediateState {
+    inventory: InventoryItem[];
+    volume: number;
+    blinding: string;
+    nonce: number;
+  }
+
+  const states: IntermediateState[] = [];
+  let currentState: IntermediateState = {
+    inventory: [...inventory],
+    volume: currentVolume,
+    blinding: blinding,
+    nonce: startNonce,
+  };
+
+  // Compute all intermediate states sequentially (this is fast, just local computation)
+  for (let i = 0; i < operations.length; i++) {
+    const op = operations[i];
+    const newBlinding = blindings[i];
+
+    // Compute new inventory after this operation
+    let newInventory: InventoryItem[];
+    let newVolume: number;
+
+    if (op.op_type === 'withdraw') {
+      newInventory = currentState.inventory
+        .map((item) =>
+          item.item_id === op.item_id
+            ? { ...item, quantity: item.quantity - op.amount }
+            : item
+        )
+        .filter((item) => item.quantity > 0);
+      newVolume = currentState.volume - op.amount * op.item_volume;
+    } else {
+      const existingIndex = currentState.inventory.findIndex(
+        (item) => item.item_id === op.item_id
+      );
+      if (existingIndex >= 0) {
+        newInventory = currentState.inventory.map((item) =>
+          item.item_id === op.item_id
+            ? { ...item, quantity: item.quantity + op.amount }
+            : item
+        );
+      } else {
+        newInventory = [
+          ...currentState.inventory,
+          { item_id: op.item_id, quantity: op.amount },
+        ];
+      }
+      newVolume = currentState.volume + op.amount * op.item_volume;
+    }
+
+    // Save current state for proof generation
+    states.push({ ...currentState });
+
+    // Update current state for next iteration
+    currentState = {
+      inventory: newInventory,
+      volume: newVolume,
+      blinding: newBlinding,
+      nonce: currentState.nonce + 1,
+    };
+  }
+
+  // Generate all proofs IN PARALLEL
+  const proofPromises = operations.map((op, i) => {
+    const state = states[i];
+    const newBlinding = blindings[i];
+
+    return proveStateTransition({
+      inventory: state.inventory,
+      current_volume: state.volume,
+      old_blinding: state.blinding,
+      new_blinding: newBlinding,
+      item_id: op.item_id,
+      amount: op.amount,
+      item_volume: op.item_volume,
+      registry_root: registryRoot,
+      max_capacity: maxCapacity,
+      nonce: state.nonce,
+      inventory_id: inventoryId,
+      op_type: op.op_type,
+    });
+  });
+
+  const proofResults = await Promise.all(proofPromises);
+  const proofEnd = performance.now();
+
+  // Build operation results with intermediate states
+  const operationResults: BatchOperationResult[] = proofResults.map((result, i) => {
+    // Compute resulting inventory for this operation
+    const state = states[i];
+    const op = operations[i];
+    let resultingInventory: InventoryItem[];
+
+    if (op.op_type === 'withdraw') {
+      resultingInventory = state.inventory
+        .map((item) =>
+          item.item_id === op.item_id
+            ? { ...item, quantity: item.quantity - op.amount }
+            : item
+        )
+        .filter((item) => item.quantity > 0);
+    } else {
+      const existingIndex = state.inventory.findIndex(
+        (item) => item.item_id === op.item_id
+      );
+      if (existingIndex >= 0) {
+        resultingInventory = state.inventory.map((item) =>
+          item.item_id === op.item_id
+            ? { ...item, quantity: item.quantity + op.amount }
+            : item
+        );
+      } else {
+        resultingInventory = [
+          ...state.inventory,
+          { item_id: op.item_id, quantity: op.amount },
+        ];
+      }
+    }
+
+    return {
+      proof: result.proof,
+      public_inputs: result.public_inputs,
+      new_commitment: result.new_commitment,
+      new_volume: result.new_volume,
+      nonce: result.nonce,
+      inventory_id: result.inventory_id,
+      registry_root: result.registry_root,
+      resultingInventory,
+      newBlinding: blindings[i],
+    };
+  });
+
+  return {
+    operations: operationResults,
+    finalCommitment: proofResults[proofResults.length - 1].new_commitment,
+    finalInventory: currentState.inventory,
+    finalBlinding: currentState.blinding,
+    proofTimeMs: Math.round(proofEnd - proofStart),
+  };
+}
+
 // ============ Transfer (Two State Transitions) ============
 
 export interface TransferProofs {

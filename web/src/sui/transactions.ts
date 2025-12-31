@@ -337,6 +337,63 @@ export function buildVerifyCapacityTx(
   return tx;
 }
 
+// ============ Batch Operations (PTB-based) ============
+
+/** Single operation for batch transaction */
+export interface BatchTxOperation {
+  proof: Uint8Array;
+  signalHash: Uint8Array;
+  proofNonce: bigint;
+  proofInventoryId: Uint8Array;
+  proofRegistryRoot: Uint8Array;
+  newCommitment: Uint8Array;
+  itemId: number;
+  amount: bigint;
+  opType: 'deposit' | 'withdraw';
+}
+
+/**
+ * Build a PTB (Programmable Transaction Block) with multiple operations.
+ * Operations are chained sequentially - each one sees the state from the previous.
+ * All operations are atomic - if any fails, all are rolled back.
+ *
+ * This achieves O(N) verification but in a single transaction with atomic guarantees.
+ */
+export function buildBatchOperationsTx(
+  packageId: string,
+  inventoryId: string,
+  registryId: string,
+  verifyingKeysId: string,
+  operations: BatchTxOperation[]
+): Transaction {
+  const tx = new Transaction();
+
+  for (const op of operations) {
+    const target = op.opType === 'deposit'
+      ? `${packageId}::${INVENTORY_MODULE}::deposit`
+      : `${packageId}::${INVENTORY_MODULE}::withdraw`;
+
+    tx.moveCall({
+      target,
+      arguments: [
+        tx.object(inventoryId),
+        tx.object(registryId),
+        tx.object(verifyingKeysId),
+        tx.pure.vector('u8', Array.from(op.proof)),
+        tx.pure.vector('u8', Array.from(op.signalHash)),
+        tx.pure.u64(op.proofNonce),
+        tx.pure.vector('u8', Array.from(op.proofInventoryId)),
+        tx.pure.vector('u8', Array.from(op.proofRegistryRoot)),
+        tx.pure.vector('u8', Array.from(op.newCommitment)),
+        tx.pure.u64(op.itemId),
+        tx.pure.u64(op.amount),
+      ],
+    });
+  }
+
+  return tx;
+}
+
 /**
  * Build transaction to create a volume registry
  */

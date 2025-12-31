@@ -187,13 +187,9 @@ async function main() {
   // Deploy VerifyingKeys (using CLI - SDK has timeout issues)
   log('Creating VerifyingKeys...');
   const vkArgs = [
+    vks.state_transition_vk,
     vks.item_exists_vk,
-    vks.withdraw_vk,
-    vks.deposit_vk,
-    vks.transfer_vk,
     vks.capacity_vk,
-    vks.deposit_capacity_vk,
-    vks.transfer_capacity_vk,
   ].join(' ');
 
   const vkCmd = `sui client call --package ${packageId} --module inventory --function init_verifying_keys_and_share --args ${vkArgs} --gas-budget 500000000 --json`;
