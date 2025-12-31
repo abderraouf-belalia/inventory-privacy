@@ -20,6 +20,42 @@ import type { StateTransitionResult } from '../types';
 import type { OnChainInventory } from '../sui/hooks';
 import { hasLocalSigner, getLocalAddress, signAndExecuteWithLocalSigner, getLocalnetClient } from '../sui/localSigner';
 
+// Helper to fetch fresh inventory state from chain before proof generation
+// This prevents stale nonce errors when inventory was modified elsewhere
+async function fetchFreshInventory(
+  inventoryId: string,
+  useLocal: boolean
+): Promise<OnChainInventory | null> {
+  try {
+    const client = useLocal ? getLocalnetClient() : null;
+    if (!client) return null;
+
+    const obj = await client.getObject({
+      id: inventoryId,
+      options: { showContent: true },
+    });
+
+    if (obj.data?.content?.dataType !== 'moveObject') {
+      return null;
+    }
+
+    const fields = obj.data.content.fields as Record<string, unknown>;
+    const commitmentBytes = fields.commitment as number[];
+    const commitment = '0x' + commitmentBytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+    return {
+      id: obj.data.objectId,
+      commitment,
+      owner: fields.owner as string,
+      nonce: Number(fields.nonce),
+      maxCapacity: Number(fields.max_capacity || 0),
+    };
+  } catch (error) {
+    console.error('Failed to fetch fresh inventory:', error);
+    return null;
+  }
+}
+
 type Operation = 'deposit' | 'withdraw';
 type Mode = 'demo' | 'onchain';
 
@@ -98,12 +134,24 @@ export function DepositWithdraw() {
       // Get registry root hash for volume validation
       const registryRoot = getRegistryRoot();
 
+      // For on-chain operations, fetch fresh inventory state to get current nonce
+      // This prevents stale nonce errors if inventory was modified elsewhere
+      let freshInventory = selectedOnChainInventory;
+      if (mode === 'onchain' && selectedOnChainInventory) {
+        const fetched = await fetchFreshInventory(selectedOnChainInventory.id, useLocalSigner);
+        if (fetched) {
+          freshInventory = fetched;
+          // Update the selected inventory state with fresh data
+          setSelectedOnChainInventory(fetched);
+        }
+      }
+
       // Get nonce and inventory_id for security binding
-      const currentNonce = mode === 'onchain' && selectedOnChainInventory
-        ? selectedOnChainInventory.nonce
+      const currentNonce = mode === 'onchain' && freshInventory
+        ? freshInventory.nonce
         : 0;
-      const currentInventoryId = mode === 'onchain' && selectedOnChainInventory
-        ? selectedOnChainInventory.id
+      const currentInventoryId = mode === 'onchain' && freshInventory
+        ? freshInventory.id
         : '0x0000000000000000000000000000000000000000000000000000000000000000';
 
       let updatedSlots: typeof currentSlots;

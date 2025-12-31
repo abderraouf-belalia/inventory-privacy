@@ -21,6 +21,42 @@ type TransferResult = TransferProofs;
 import type { OnChainInventory } from '../sui/hooks';
 import { hasLocalSigner, getLocalAddress, signAndExecuteWithLocalSigner, getLocalnetClient } from '../sui/localSigner';
 
+// Helper to fetch fresh inventory state from chain before proof generation
+// This prevents stale nonce errors when inventory was modified elsewhere
+async function fetchFreshInventory(
+  inventoryId: string,
+  useLocal: boolean
+): Promise<OnChainInventory | null> {
+  try {
+    const client = useLocal ? getLocalnetClient() : null;
+    if (!client) return null;
+
+    const obj = await client.getObject({
+      id: inventoryId,
+      options: { showContent: true },
+    });
+
+    if (obj.data?.content?.dataType !== 'moveObject') {
+      return null;
+    }
+
+    const fields = obj.data.content.fields as Record<string, unknown>;
+    const commitmentBytes = fields.commitment as number[];
+    const commitment = '0x' + commitmentBytes.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+    return {
+      id: obj.data.objectId,
+      commitment,
+      owner: fields.owner as string,
+      nonce: Number(fields.nonce),
+      maxCapacity: Number(fields.max_capacity || 0),
+    };
+  } catch (error) {
+    console.error('Failed to fetch fresh inventory:', error);
+    return null;
+  }
+}
+
 interface InventoryState {
   slots: InventorySlot[];
   blinding: string;
@@ -135,14 +171,33 @@ export function Transfer() {
       const registryRoot = getRegistryRoot();
       const srcMaxCapacity = mode === 'demo' ? 0 : srcOnChain?.maxCapacity || 0;
 
-      // Get nonce and inventory_id for security binding
-      const srcNonce = mode === 'onchain' && srcOnChain ? srcOnChain.nonce : 0;
-      const srcInventoryId = mode === 'onchain' && srcOnChain
-        ? srcOnChain.id
+      // For on-chain operations, fetch fresh inventory state to get current nonces
+      // This prevents stale nonce errors if inventories were modified elsewhere
+      let freshSrcOnChain = srcOnChain;
+      let freshDstOnChain = dstOnChain;
+      if (mode === 'onchain') {
+        const [fetchedSrc, fetchedDst] = await Promise.all([
+          srcOnChain ? fetchFreshInventory(srcOnChain.id, useLocalSigner) : null,
+          dstOnChain ? fetchFreshInventory(dstOnChain.id, useLocalSigner) : null,
+        ]);
+        if (fetchedSrc) {
+          freshSrcOnChain = fetchedSrc;
+          setSrcOnChain(fetchedSrc);
+        }
+        if (fetchedDst) {
+          freshDstOnChain = fetchedDst;
+          setDstOnChain(fetchedDst);
+        }
+      }
+
+      // Get nonce and inventory_id for security binding (using fresh data)
+      const srcNonce = mode === 'onchain' && freshSrcOnChain ? freshSrcOnChain.nonce : 0;
+      const srcInventoryId = mode === 'onchain' && freshSrcOnChain
+        ? freshSrcOnChain.id
         : '0x0000000000000000000000000000000000000000000000000000000000000000';
-      const dstNonce = mode === 'onchain' && dstOnChain ? dstOnChain.nonce : 0;
-      const dstInventoryId = mode === 'onchain' && dstOnChain
-        ? dstOnChain.id
+      const dstNonce = mode === 'onchain' && freshDstOnChain ? freshDstOnChain.nonce : 0;
+      const dstInventoryId = mode === 'onchain' && freshDstOnChain
+        ? freshDstOnChain.id
         : '0x0000000000000000000000000000000000000000000000000000000000000000';
 
       const proofStart = performance.now();
