@@ -5,11 +5,10 @@ import { getLocalAddress, hasLocalSigner } from '../sui/localSigner';
 
 const navItems = [
   { path: '/', label: 'HOME' },
-  { path: '/inventory', label: 'CREATE' },
-  { path: '/prove', label: 'PROVE' },
+  { path: '/on-chain', label: 'INVENTORIES' },
   { path: '/operations', label: 'DEPOSIT/WITHDRAW' },
   { path: '/transfer', label: 'TRANSFER' },
-  { path: '/on-chain', label: 'ON-CHAIN' },
+  { path: '/prove', label: 'PROVE' },
   { path: '/explorer', label: 'EXPLORER' },
 ];
 

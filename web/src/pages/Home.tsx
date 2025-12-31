@@ -188,11 +188,11 @@ OFF-CHAIN: SMT state, blinding factor (kept secret)`}
 
       {/* CTA */}
       <div className="row" style={{ justifyContent: 'center' }}>
-        <Link to="/inventory" className="btn btn-primary">
+        <Link to="/on-chain" className="btn btn-primary">
           [CREATE INVENTORY]
         </Link>
-        <Link to="/prove" className="btn btn-secondary">
-          [TRY PROOF DEMO]
+        <Link to="/operations" className="btn btn-secondary">
+          [DEPOSIT/WITHDRAW]
         </Link>
         <Link to="/explorer" className="btn btn-secondary">
           [VIEW EXPLORER]
