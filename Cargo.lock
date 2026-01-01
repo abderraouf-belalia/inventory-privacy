@@ -609,7 +609,10 @@ dependencies = [
  "ark-serialize",
  "ark-snark",
  "ark-std",
+ "num-bigint",
+ "num-traits",
  "rand",
+ "rayon",
 ]
 
 [[package]]
@@ -649,6 +652,7 @@ dependencies = [
  "hex",
  "inventory-circuits",
  "rand",
+ "rayon",
  "serde_json",
  "tempfile",
  "thiserror",
