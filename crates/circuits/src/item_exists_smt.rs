@@ -3,7 +3,7 @@
 //! Proves that an inventory contains at least a minimum quantity of a specific item.
 //! Uses a single SMT membership proof.
 //!
-//! Public input: Anemoi(commitment, item_id, min_quantity)
+//! Public input: Poseidon(commitment, item_id, min_quantity)
 //!
 //! This allows proving ownership without revealing exact quantities.
 
@@ -12,7 +12,7 @@ use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 
-use anemoi::{anemoi_hash_many, anemoi_hash_many_var};
+use crate::poseidon::{poseidon_hash_many, poseidon_hash_many_var};
 use crate::smt::{verify_membership, MerkleProof, MerkleProofVar};
 use crate::smt_commitment::{create_smt_commitment, create_smt_commitment_var};
 
@@ -27,7 +27,7 @@ pub fn compute_item_exists_hash(
         Fr::from(item_id),
         Fr::from(min_quantity),
     ];
-    anemoi_hash_many(&inputs)
+    poseidon_hash_many(&inputs)
 }
 
 /// ItemExists Circuit for SMT-based inventory.
@@ -91,14 +91,14 @@ impl ItemExistsSMTCircuit {
         min_quantity: u64,
         proof: MerkleProof<Fr>,
     ) -> Self {
-        // Compute commitment using Anemoi
+        // Compute commitment using Poseidon
         let commitment = create_smt_commitment(
             inventory_root,
             current_volume,
             blinding,
         );
 
-        // Compute public hash using Anemoi
+        // Compute public hash using Poseidon
         let public_hash = compute_item_exists_hash(
             commitment,
             item_id,
@@ -181,7 +181,7 @@ impl ConstraintSynthesizer<Fr> for ItemExistsSMTCircuit {
         // which binds the min_quantity, and the prover can only succeed if
         // actual_quantity >= min_quantity
 
-        // === Constraint 3: Compute and verify commitment using Anemoi ===
+        // === Constraint 3: Compute and verify commitment using Poseidon ===
         let commitment_var = create_smt_commitment_var(
             cs.clone(),
             &root_var,
@@ -189,13 +189,13 @@ impl ConstraintSynthesizer<Fr> for ItemExistsSMTCircuit {
             &blinding_var,
         )?;
 
-        // === Constraint 4: Compute and verify public hash using Anemoi ===
+        // === Constraint 4: Compute and verify public hash using Poseidon ===
         let inputs = vec![
             commitment_var,
             item_id_var,
             min_qty_var,
         ];
-        let computed_hash = anemoi_hash_many_var(cs.clone(), &inputs)?;
+        let computed_hash = poseidon_hash_many_var(cs.clone(), &inputs)?;
 
         computed_hash.enforce_equal(&public_hash_var)?;
 

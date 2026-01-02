@@ -10,7 +10,7 @@
 //! - inventory_id (for cross-inventory protection - verified on-chain)
 //! - registry_root (for volume validation - verified against VolumeRegistry)
 //!
-//! signal_hash = Anemoi(
+//! signal_hash = Poseidon(
 //!     old_commitment,
 //!     new_commitment,
 //!     registry_root,
@@ -26,7 +26,7 @@ use ark_bn254::Fr;
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 
-use anemoi::{anemoi_hash_many, anemoi_hash_many_var};
+use crate::poseidon::{poseidon_hash_many, poseidon_hash_many_var};
 
 /// Operation types for state transitions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -83,7 +83,7 @@ impl SignalInputs {
             self.inventory_id,
         ];
 
-        anemoi_hash_many(&inputs)
+        poseidon_hash_many(&inputs)
     }
 }
 
@@ -154,7 +154,7 @@ impl SignalInputsVar {
             self.inventory_id.clone(),
         ];
 
-        anemoi_hash_many_var(cs, &inputs)
+        poseidon_hash_many_var(cs, &inputs)
     }
 }
 

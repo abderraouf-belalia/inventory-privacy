@@ -5,7 +5,6 @@ edition = "2021"
 description = "ZK circuits for private inventory operations"
 
 [dependencies]
-anemoi = { git = "https://github.com/abderraouf-belalia/anemoi" }
 ark-ff = "0.4"
 ark-relations = "0.4"
 ark-r1cs-std = "0.4"

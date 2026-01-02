@@ -1,11 +1,11 @@
 //! Merkle proof structure for SMT membership verification.
 //!
-//! Uses Anemoi hash function for efficient ZK proofs.
+//! Uses Poseidon hash function for ZK-friendly hashing.
 
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
 
-use anemoi::anemoi_hash_two;
+use crate::poseidon::poseidon_hash_two;
 
 /// A Merkle proof for an SMT leaf.
 ///
@@ -52,9 +52,9 @@ impl<F: PrimeField> MerkleProof<F> {
     }
 }
 
-// Anemoi hashing methods (specialized for Fr)
+// Poseidon hashing methods (specialized for Fr)
 impl MerkleProof<Fr> {
-    /// Compute the root hash from this proof and the leaf value using Anemoi.
+    /// Compute the root hash from this proof and the leaf value using Poseidon.
     pub fn compute_root(&self, item_id: u64, quantity: u64) -> Fr {
         // Start with leaf hash
         let mut current = Self::hash_leaf(item_id, quantity);
@@ -88,14 +88,14 @@ impl MerkleProof<Fr> {
         current
     }
 
-    /// Hash a leaf: H(item_id, quantity) using Anemoi
+    /// Hash a leaf: H(item_id, quantity) using Poseidon
     fn hash_leaf(item_id: u64, quantity: u64) -> Fr {
-        anemoi_hash_two(Fr::from(item_id), Fr::from(quantity))
+        poseidon_hash_two(Fr::from(item_id), Fr::from(quantity))
     }
 
-    /// Hash two nodes: H(left, right) using Anemoi
+    /// Hash two nodes: H(left, right) using Poseidon
     fn hash_nodes(left: Fr, right: Fr) -> Fr {
-        anemoi_hash_two(left, right)
+        poseidon_hash_two(left, right)
     }
 }
 

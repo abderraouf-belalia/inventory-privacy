@@ -5,10 +5,10 @@
 //! - `ItemExistsSMTCircuit`: Prove inventory contains >= N of item X
 //! - `CapacitySMTCircuit`: Prove inventory volume is within capacity
 //!
-//! All circuits use the Anemoi hash function (CRYPTO 2023) for ~2x constraint
-//! reduction compared to Poseidon.
+//! Uses Poseidon hash function optimized for ZK circuits.
 
 // Core modules
+pub mod poseidon;
 pub mod range_check; // Range checks for underflow prevention
 pub mod signal;
 pub mod smt;
@@ -22,8 +22,8 @@ pub mod state_transition;
 #[cfg(test)]
 mod tests;
 
-// Re-export anemoi crate
-pub use anemoi::{anemoi_hash, anemoi_hash_two, anemoi_hash_many};
+// Re-export poseidon hash functions
+pub use poseidon::{poseidon_hash, poseidon_hash_two, poseidon_hash_many};
 
 // SMT infrastructure
 pub use smt::{

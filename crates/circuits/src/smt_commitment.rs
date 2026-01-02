@@ -1,7 +1,7 @@
 //! SMT-based commitment scheme for inventories.
 //!
-//! The commitment scheme uses Anemoi hash:
-//! commitment = Anemoi(inventory_root, current_volume, blinding)
+//! The commitment scheme uses Poseidon hash:
+//! commitment = Poseidon(inventory_root, current_volume, blinding)
 //!
 //! Where:
 //! - inventory_root: Root of the Sparse Merkle Tree containing all items
@@ -12,11 +12,11 @@ use ark_bn254::Fr;
 use ark_r1cs_std::fields::fp::FpVar;
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 
-use anemoi::{anemoi_hash_many, anemoi_hash_many_var};
+use crate::poseidon::{poseidon_hash_many, poseidon_hash_many_var};
 
-/// Create an SMT-based inventory commitment using Anemoi.
+/// Create an SMT-based inventory commitment using Poseidon.
 ///
-/// commitment = Anemoi(inventory_root, current_volume, blinding)
+/// commitment = Poseidon(inventory_root, current_volume, blinding)
 pub fn create_smt_commitment(
     inventory_root: Fr,
     current_volume: u64,
@@ -27,10 +27,10 @@ pub fn create_smt_commitment(
         Fr::from(current_volume),
         blinding,
     ];
-    anemoi_hash_many(&inputs)
+    poseidon_hash_many(&inputs)
 }
 
-/// Compute SMT commitment in-circuit using Anemoi.
+/// Compute SMT commitment in-circuit using Poseidon.
 pub fn create_smt_commitment_var(
     cs: ConstraintSystemRef<Fr>,
     inventory_root: &FpVar<Fr>,
@@ -42,7 +42,7 @@ pub fn create_smt_commitment_var(
         current_volume.clone(),
         blinding.clone(),
     ];
-    anemoi_hash_many_var(cs, &inputs)
+    poseidon_hash_many_var(cs, &inputs)
 }
 
 /// Inventory state for SMT-based design.

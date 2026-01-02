@@ -3,7 +3,7 @@
 //! Proves that an inventory's total volume is within capacity limits.
 //! This is much simpler than the old circuit since volume is tracked incrementally.
 //!
-//! Public input: Anemoi(commitment, max_capacity)
+//! Public input: Poseidon(commitment, max_capacity)
 //!
 //! This allows proving compliance without revealing actual volume.
 
@@ -12,7 +12,7 @@ use ark_r1cs_std::fields::fp::FpVar;
 use ark_r1cs_std::prelude::*;
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError};
 
-use anemoi::{anemoi_hash_many, anemoi_hash_many_var};
+use crate::poseidon::{poseidon_hash_many, poseidon_hash_many_var};
 use crate::smt_commitment::{create_smt_commitment, create_smt_commitment_var};
 
 /// Compute the public input hash for Capacity proof.
@@ -24,7 +24,7 @@ pub fn compute_capacity_hash(
         commitment,
         Fr::from(max_capacity),
     ];
-    anemoi_hash_many(&inputs)
+    poseidon_hash_many(&inputs)
 }
 
 /// Capacity Proof Circuit for SMT-based inventory.
@@ -68,14 +68,14 @@ impl CapacitySMTCircuit {
         blinding: Fr,
         max_capacity: u64,
     ) -> Self {
-        // Compute commitment using Anemoi
+        // Compute commitment using Poseidon
         let commitment = create_smt_commitment(
             inventory_root,
             current_volume,
             blinding,
         );
 
-        // Compute public hash using Anemoi
+        // Compute public hash using Poseidon
         let public_hash = compute_capacity_hash(
             commitment,
             max_capacity,
@@ -118,7 +118,7 @@ impl ConstraintSynthesizer<Fr> for CapacitySMTCircuit {
                 .ok_or(SynthesisError::AssignmentMissing)
         })?;
 
-        // === Constraint 1: Compute commitment using Anemoi ===
+        // === Constraint 1: Compute commitment using Poseidon ===
         let commitment_var = create_smt_commitment_var(
             cs.clone(),
             &root_var,
@@ -126,12 +126,12 @@ impl ConstraintSynthesizer<Fr> for CapacitySMTCircuit {
             &blinding_var,
         )?;
 
-        // === Constraint 2: Compute and verify public hash using Anemoi ===
+        // === Constraint 2: Compute and verify public hash using Poseidon ===
         let inputs = vec![
             commitment_var,
             max_capacity_var.clone(),
         ];
-        let computed_hash = anemoi_hash_many_var(cs.clone(), &inputs)?;
+        let computed_hash = poseidon_hash_many_var(cs.clone(), &inputs)?;
 
         computed_hash.enforce_equal(&public_hash_var)?;
 

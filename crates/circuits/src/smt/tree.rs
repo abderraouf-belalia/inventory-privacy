@@ -4,12 +4,12 @@
 //! Only non-empty leaves and their ancestors are stored, making it memory-efficient
 //! for sparse data like inventory items.
 //!
-//! Uses Anemoi hash function for ~2x constraint efficiency vs Poseidon.
+//! Uses Poseidon hash function for ZK-friendly hashing.
 
 use ark_bn254::Fr;
 use std::collections::HashMap;
 
-use anemoi::anemoi_hash_two;
+use crate::poseidon::poseidon_hash_two;
 use super::proof::MerkleProof;
 
 /// Default tree depth (12 levels = 4,096 possible items)
@@ -19,7 +19,7 @@ pub const DEFAULT_DEPTH: usize = 12;
 ///
 /// Keys are item IDs (0 to 2^depth - 1).
 /// Values are quantities stored as field elements.
-/// Uses Anemoi hash function for efficient ZK proofs.
+/// Uses Poseidon hash function for efficient ZK proofs.
 #[derive(Clone)]
 pub struct SparseMerkleTree {
     /// Tree depth (number of levels from root to leaves)
@@ -78,14 +78,14 @@ impl SparseMerkleTree {
         defaults
     }
 
-    /// Hash a leaf: H(item_id, quantity) using Anemoi
+    /// Hash a leaf: H(item_id, quantity) using Poseidon
     fn hash_leaf(item_id: u64, quantity: u64) -> Fr {
-        anemoi_hash_two(Fr::from(item_id), Fr::from(quantity))
+        poseidon_hash_two(Fr::from(item_id), Fr::from(quantity))
     }
 
-    /// Hash two child nodes: H(left, right) using Anemoi
+    /// Hash two child nodes: H(left, right) using Poseidon
     fn hash_nodes(left: Fr, right: Fr) -> Fr {
-        anemoi_hash_two(left, right)
+        poseidon_hash_two(left, right)
     }
 
     /// Get the quantity for an item, or 0 if not present.

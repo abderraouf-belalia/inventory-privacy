@@ -1,7 +1,6 @@
-//! In-circuit SMT verification gadgets using Anemoi hash.
+//! In-circuit SMT verification gadgets using Poseidon hash.
 //!
 //! These gadgets allow ZK circuits to verify Merkle proofs and update SMT roots.
-//! Uses Anemoi for ~2x constraint reduction compared to Poseidon.
 
 use ark_bn254::Fr;
 use ark_r1cs_std::{
@@ -11,14 +10,14 @@ use ark_r1cs_std::{
 };
 use ark_relations::r1cs::{ConstraintSystemRef, SynthesisError};
 
-use anemoi::{anemoi_hash_two, anemoi_hash_two_var};
+use crate::poseidon::{poseidon_hash_two, poseidon_hash_two_var};
 use super::proof::MerkleProof;
 
-/// Compute the default leaf hash H(0, 0) natively using Anemoi.
+/// Compute the default leaf hash H(0, 0) natively using Poseidon.
 /// This is the hash of an empty slot and is constant.
 /// Precomputing this saves constraints per verify_and_update call.
 pub fn compute_default_leaf_hash() -> Fr {
-    anemoi_hash_two(Fr::from(0u64), Fr::from(0u64))
+    poseidon_hash_two(Fr::from(0u64), Fr::from(0u64))
 }
 
 /// Circuit variable representation of a Merkle proof.
@@ -68,16 +67,16 @@ impl MerkleProofVar {
     }
 }
 
-/// Hash two field elements using Anemoi in-circuit.
+/// Hash two field elements using Poseidon in-circuit.
 pub fn hash_two(
     cs: ConstraintSystemRef<Fr>,
     left: &FpVar<Fr>,
     right: &FpVar<Fr>,
 ) -> Result<FpVar<Fr>, SynthesisError> {
-    anemoi_hash_two_var(cs, left, right)
+    poseidon_hash_two_var(cs, left, right)
 }
 
-/// Hash a leaf (item_id, quantity) using Anemoi in-circuit.
+/// Hash a leaf (item_id, quantity) using Poseidon in-circuit.
 pub fn hash_leaf(
     cs: ConstraintSystemRef<Fr>,
     item_id: &FpVar<Fr>,
@@ -312,15 +311,15 @@ mod gadget_tests {
         .unwrap();
 
         let num_constraints = cs.num_constraints();
-        println!("Anemoi SMT membership verification constraints (depth {}): {}", DEFAULT_DEPTH, num_constraints);
+        println!("Poseidon SMT membership verification constraints (depth {}): {}", DEFAULT_DEPTH, num_constraints);
 
-        // With Anemoi and depth 12, expect roughly:
-        // - 1 leaf hash: ~126 constraints
-        // - 12 node hashes: 12 * 126 = 1512 constraints
-        // Total: ~1638 constraints (vs ~3900 with Poseidon)
+        // With Poseidon and depth 12, expect roughly:
+        // - 1 leaf hash: ~241 constraints
+        // - 12 node hashes: 12 * 241 = 2892 constraints
+        // Total: ~3133 constraints
         assert!(
-            num_constraints < 2500,
-            "Too many constraints: {}. Expected < 2500 for depth {}",
+            num_constraints < 5000,
+            "Too many constraints: {}. Expected < 5000 for depth {}",
             num_constraints,
             DEFAULT_DEPTH
         );

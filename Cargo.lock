@@ -24,19 +24,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "anemoi"
-version = "0.1.0"
-source = "git+https://github.com/abderraouf-belalia/anemoi#7e303213a3bee459269833645db58cc3fe08266a"
-dependencies = [
- "ark-bn254",
- "ark-ff",
- "ark-r1cs-std",
- "ark-relations",
- "num-bigint",
- "num-traits",
-]
-
-[[package]]
 name = "ark-bn254"
 version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -613,7 +600,6 @@ dependencies = [
 name = "inventory-circuits"
 version = "0.1.0"
 dependencies = [
- "anemoi",
  "ark-bn254",
  "ark-crypto-primitives",
  "ark-ff",
