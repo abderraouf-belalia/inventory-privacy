@@ -58,11 +58,11 @@ inventory-privacy/
 
 All circuits use the **Poseidon** hash function optimized for ZK circuits (~240 constraints per hash).
 
-| Circuit | Purpose | Constraints | Proof Time |
-|---------|---------|-------------|------------|
-| `StateTransition` | Prove valid deposit/withdraw with capacity check | ~8,597 | ~450ms |
-| `ItemExists` | Prove inventory contains >= N of item | ~4,124 | ~200ms |
-| `Capacity` | Prove inventory volume is within capacity | ~724 | ~40ms |
+| Circuit | Purpose | Constraints |
+|---------|---------|-------------|
+| `StateTransition` | Prove valid deposit/withdraw with capacity check | ~8,597 |
+| `ItemExists` | Prove inventory contains >= N of item | ~4,124 |
+| `Capacity` | Prove inventory volume is within capacity | ~724 |
 
 ### Commitment Scheme
 
@@ -209,16 +209,14 @@ curl -X POST http://localhost:3001/inventory/create \
 | Underflow | 32-bit range checks on quantities |
 | Capacity bypass | Explicit capacity check in circuit |
 
-## Performance
+## Operations
 
-| Operation | Proofs | Proving Time | Verification | Gas |
-|-----------|--------|--------------|--------------|-----|
-| Deposit | 1 | ~450ms | ~250ms | 0.001 SUI |
-| Withdraw | 1 | ~450ms | ~250ms | 0.001 SUI |
-| Transfer | 2 | ~800ms | ~300ms | 0.001 SUI |
-| Prove Ownership | 1 | ~200ms | ~200ms | - |
-
-*Measured on modern hardware. Proofs generated in parallel where applicable.*
+| Operation | Proofs | Circuit |
+|-----------|--------|---------|
+| Deposit | 1 | StateTransition |
+| Withdraw | 1 | StateTransition |
+| Transfer | 2 | 2x StateTransition |
+| Prove Ownership | 1 | ItemExists |
 
 ## Documentation
 
